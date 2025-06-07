@@ -50,6 +50,19 @@ class BaseTask:
                 f"Previous checkpoint found at {self.chkpt_path}, resuming job from this checkecpoint"
             )
             self.trainer.load_checkpoint(checkpoint_path=self.chkpt_path)
+        if self.config["optim"].get("FL", None) is not None:
+            print('Frozen layers: ', self.config["optim"]["FL"] )
+            for name, param in self.trainer.model.named_parameters():
+                if 'embedding' in name:
+                    param.requires_grad = False
+            for FL_item in range(self.config["optim"]["FL"]):
+                for name, param in self.trainer.model.named_parameters():
+                    if 'backbone.blocks.' + str(FL_item) in name:
+                        param.requires_grad = False
+            print("List of layers:")
+            for name, param in self.trainer.model.named_parameters():
+                print(f"{name}: requires_grad={param.requires_grad}")
+
 
     def run(self):
         raise NotImplementedError

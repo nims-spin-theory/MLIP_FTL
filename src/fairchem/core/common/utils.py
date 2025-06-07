@@ -1219,8 +1219,23 @@ def match_state_dict(
         }
     else:
         new_dict = checkpoint_state_dict
-    return new_dict
 
+    source_dict = new_dict
+    target_dict = model_state_dict
+    # Filter only keys that exist in both models
+    common_keys = [k for k in source_dict if k in target_dict and source_dict[k].shape == target_dict[k].shape]
+
+    print("Copy parameter: common_keys len: ", len(common_keys))
+    print("Copy parameter: source_dict: ",     len(source_dict))
+    print("Copy parameter: target_dict: ",     len(target_dict))
+
+    # Update only the common parameters
+    for k in common_keys:
+        target_dict[k] = source_dict[k]
+
+    new_dict = target_dict
+
+    return new_dict
 
 def load_state_dict(
     module: nn.Module,

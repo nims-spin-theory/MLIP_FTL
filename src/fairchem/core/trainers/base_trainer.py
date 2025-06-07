@@ -608,15 +608,18 @@ class BaseTrainer(ABC):
 
         # attributes that are necessary for training and validation
         if inference_only is False:
-            self.epoch = checkpoint.get("epoch", 0)
-            self.step = checkpoint.get("step", 0)
-            self.best_val_metric = checkpoint.get("best_val_metric", None)
-            self.primary_metric = checkpoint.get("primary_metric", None)
+            #self.epoch = checkpoint.get("epoch", 0)
+            #self.step = checkpoint.get("step", 0)
+            #self.best_val_metric = checkpoint.get("best_val_metric", None)
+            #self.primary_metric = checkpoint.get("primary_metric", None)
 
-            if "optimizer" in checkpoint:
-                self.optimizer.load_state_dict(checkpoint["optimizer"])
-            if "scheduler" in checkpoint and checkpoint["scheduler"] is not None:
-                self.scheduler.scheduler.load_state_dict(checkpoint["scheduler"])
+            #if "optimizer" in checkpoint:
+            #    self.optimizer.load_state_dict(checkpoint["optimizer"])
+            #if "scheduler" in checkpoint and checkpoint["scheduler"] is not None:
+            #    self.scheduler.scheduler.load_state_dict(checkpoint["scheduler"])
+            logging.info(
+                "The code is modified so that the continued training do not load previous epoch and scheduler!"
+            )
         else:
             logging.info(
                 "Loading checkpoint in inference-only mode, not loading keys associated with trainer state!"
@@ -640,23 +643,23 @@ class BaseTrainer(ABC):
             )
             load_scales_compat(self._unwrapped_model, scale_dict)
 
-        for key, state_dict in checkpoint["normalizers"].items():
-            ### Convert old normalizer keys to new target keys
-            if key == "target":
-                target_key = "energy"
-            elif key == "grad_target":
-                target_key = "forces"
-            else:
-                target_key = key
-
-            if target_key not in self.normalizers:
-                self.normalizers[target_key] = create_normalizer(state_dict=state_dict)
-            else:
-                mkeys = self.normalizers[target_key].load_state_dict(state_dict)
-                assert len(mkeys.missing_keys) == 0
-                assert len(mkeys.unexpected_keys) == 0
-
-            self.normalizers[target_key].to(map_location)
+#        for key, state_dict in checkpoint["normalizers"].items():
+#            ### Convert old normalizer keys to new target keys
+#            if key == "target":
+#                target_key = "energy"
+#            elif key == "grad_target":
+#                target_key = "forces"
+#            else:
+#                target_key = key
+#
+#            if target_key not in self.normalizers:
+#                self.normalizers[target_key] = create_normalizer(state_dict=state_dict)
+#            else:
+#                mkeys = self.normalizers[target_key].load_state_dict(state_dict)
+#                assert len(mkeys.missing_keys) == 0
+#                assert len(mkeys.unexpected_keys) == 0
+#
+#            self.normalizers[target_key].to(map_location)
 
         for key, state_dict in checkpoint.get("elementrefs", {}).items():
             if key not in self.elementrefs:
@@ -709,7 +712,7 @@ class BaseTrainer(ABC):
             if hasattr(self._unwrapped_model, "no_weight_decay"):
                 self.model_params_no_wd = self._unwrapped_model.no_weight_decay()
 
-            params_decay, params_no_decay, name_no_decay = [], [], []
+            params_decay, params_no_decay, name_no_decay, name_decay = [], [], [], []
             for name, param in self.model.named_parameters():
                 if not param.requires_grad:
                     continue
@@ -721,10 +724,13 @@ class BaseTrainer(ABC):
                     name_no_decay.append(name)
                 else:
                     params_decay.append(param)
+                    name_decay.append(name)
 
             if distutils.is_master():
                 logging.info("Parameters without weight decay:")
                 logging.info(name_no_decay)
+                logging.info("Parameters with weight decay:")
+                logging.info(name_decay)
 
             self.optimizer = optimizer(
                 params=[
@@ -823,9 +829,12 @@ class BaseTrainer(ABC):
             "mae" in primary_metric
             and val_metrics[primary_metric]["metric"] < self.best_val_metric
         ) or (
+            "mse" in primary_metric
+            and val_metrics[primary_metric]["metric"] < self.best_val_metric
+        ) or (
             "mae" not in primary_metric
             and val_metrics[primary_metric]["metric"] > self.best_val_metric
-        ):
+        ) or True:
             self.best_val_metric = val_metrics[primary_metric]["metric"]
             self.save(
                 metrics=val_metrics,
