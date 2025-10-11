@@ -58,19 +58,16 @@ pytest tests/core
 ```
 
 ## 3. Usage: Convert train dataset to database for training
-This is mainly shown using the example in `example/prepare_database` .
+This is shown using the example in `example/1_prepare_dataset` .
 
-In these examples, we used 1000 data points of formation energy as the train
-dataset. This is just for illustration. Although a good performance is obtained
-for formation energy with this relatively small dataset, 1000 might be not
-enough for other properties. The dataset is from DXMag Computational HeuslerDB
-`https://www.nims.go.jp/group/spintheory/database/`.
+## 4. Usage: Train a model: formation energy model from scratch 
+This is shown using the example in `example/2_train_scratch_formE` .
 
+## 4. Usage: Train a model: Tc model by transfer learning using formation energy model as base model
+This is shown using the example in `example/3_train_TL_Tc` .
 
-## 4. Usage: Train a model: from scratch or transfer learning
-This is mainly shown using the example in `example/train` .
-
-
+## 4. Usage: Train a model: Tc model by transfer learning using MLIP as base model
+This is shown using the example in `example/4_train_TL_Tc_MLIP` .
 
 
 ## 5. Possible problem and fix
@@ -117,14 +114,6 @@ the `conda_env_name` is `fairchem`.
 
 ```
 
-
-## 5. Usage: Application of model for prediction
-This is mainly shown using the example in `example/application` .
-
-Here, we applied the obtained ML model to predict for formation energy for 500 compounds not included in our train dataset. The ML prediction is compared to DFT results.  
-
-
-## Acknowledgement 
 
 
 

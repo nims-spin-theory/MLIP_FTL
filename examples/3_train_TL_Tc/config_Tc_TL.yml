@@ -1,24 +1,24 @@
 dataset:
   train:
     format: lmdb
-    src: set_example_train/train.lmdb
+    src: set_example_trainTL/train.lmdb
     key_mapping:
-      Form: energy
+      Tc: energy
     transforms:
       normalizer:
         energy:
-          mean:   0.05
-          stdev:  0.40
+          mean:   350
+          stdev:  350
   val:
     format: lmdb
-    src: set_example_train/val.lmdb
+    src: set_example_trainTL/val.lmdb
     key_mapping:
-      Form: energy
+      Tc: energy
   test:
     format: lmdb
-    src: set_example_train/test.lmdb
+    src: set_example_trainTL/test.lmdb
     key_mapping:
-      Form: energy
+      Tc: energy
       
 evaluation_metrics:
   metrics:
@@ -38,8 +38,8 @@ model:
     cutoff: 6.0
     direct_forces: false
     distance_function: gaussian
-    edge_channels:    32
-    hidden_channels:  32
+    edge_channels:    128
+    hidden_channels:  128
     lmax: 3
     max_neighbors: 300
     max_num_elements: 100
@@ -48,7 +48,7 @@ model:
     model: esen_backbone
     norm_type: rms_norm_sh
     num_distance_basis: 32
-    num_layers: 3
+    num_layers: 5
     otf_graph: true
     regress_forces: false
     regress_stress: false
@@ -58,26 +58,26 @@ model:
     use_pbc_single: true
   heads:
     energy:
-      # module: esen_mlp_efs_head
       module: esen_mlp_energy_head
   name: hydra
   otf_graph: true
   pass_through_head_outputs: true
 optim:
-  batch_size:      32
+  FL: 2
+  batch_size:       8
   eval_batch_size: 32
   # eval_every: 100
   clip_grad_norm: 100
   ema_decay: 0.999
   lr_initial: 0.0004
-  max_epochs:  40
+  max_epochs:  100
   num_workers: 4
   optimizer: AdamW
   optimizer_params:
     weight_decay: 0.001
   scheduler: LambdaLR
   scheduler_params:
-    epochs: 40
+    epochs: 100
     lambda_type: cosine
     lr: 0.0004
     lr_min_factor: 0.1
