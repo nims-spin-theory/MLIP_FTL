@@ -139,7 +139,7 @@ For complete information on available parameters, run `python prepare_data.py -h
 python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
                 --material_id  UUID \
                 --target_property "formation energy (eV/atom)" \
-                --num_layers 3 --max_epochs 50
+                --num_layers 5 --max_epochs 50
 ```
 
 **Key Parameters:**
@@ -155,7 +155,7 @@ The training process outputs detailed information explaining each procedure step
 python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
                 --material_id  UUID \
                 --target_property "formation energy (eV/atom)" \
-                --num_layers 3 --max_epochs 50 \
+                --num_layers 5 --max_epochs 50 \
                 --num_gpu 2
 ```
 
@@ -164,7 +164,7 @@ python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
 python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
                 --material_id  UUID \
                 --target_property "formation energy (eV/atom)" \
-                --num_layers 3 --max_epochs 50 \
+                --num_layers 5 --max_epochs 50 \
                 --cpu_only
 ```
 
