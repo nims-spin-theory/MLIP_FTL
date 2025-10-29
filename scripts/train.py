@@ -37,11 +37,7 @@ Usage examples:
         --max_epochs 200 \
         --num_gpus 4
         
-    # Evaluation only (skip training)
-    python train.py \
-        --target_property 2shot \
-        --skip_training \
-        --checkpoint_dir ./checkpoints/2shot_MLIP_TL
+    # Predication application only 
         
     # Dry run (generate config only)
     python train.py \
@@ -65,6 +61,7 @@ import argparse
 import os
 import time
 import subprocess
+import shutil
 
 import numpy as np
 import pandas as pd
@@ -257,7 +254,7 @@ def optimize_batch_size(data_dir, max_batch_size=64, target_property="formation_
         return 8
 
 
-def collect_result(dft_path, prd_path, target, application=False):
+def collect_result(dft_path, prd_path, target, material_id, application=False):
     """
     Collect and organize DFT vs ML prediction results.
     
@@ -265,6 +262,7 @@ def collect_result(dft_path, prd_path, target, application=False):
         dft_path (str): Path to test set (LMDB format)
         prd_path (str): Path to test prediction output (ocp_predictions.npz)
         target (str): Target property name in LMDB
+        material_id (str): material_id 
         application (bool): True if used for application, False for test evaluation
         
     Returns:
@@ -295,11 +293,11 @@ def collect_result(dft_path, prd_path, target, application=False):
     for ind, data in enumerate(dataset):
         row = {
             "id": data.id,
-            'material_id': data.material_id,
-            target + "_ML": prd[ind],
+            'material_id': data[material_id],
+            target + " ML": prd[ind],
         }
         if not application:
-            row[target + "_DFT"] = dft[ind]
+            row[target + " DFT"] = dft[ind]
             
         data_list.append(row)
     
@@ -604,7 +602,7 @@ def run_training(config_path, run_dir, job_name, base_model=None, gpu_id=0,
     
     # Construct training command
     cmd = [
-        'python', str(fairchem_main()),
+        str(fairchem_main()),
         '--mode', 'train',
         '--config-yml', config_path,
         '--run-dir', run_dir,
@@ -613,7 +611,12 @@ def run_training(config_path, run_dir, job_name, base_model=None, gpu_id=0,
     ]
     if base_model is not None:
         cmd += ['--checkpoint', base_model]
-
+    if num_gpus>1:
+        cmd = ['torchrun', '--standalone', '--nnodes=1',  '--nproc_per_node=1', ] + cmd
+        cmd += ['--num-gpus', str(num_gpus)]
+    else:
+        cmd = ['python'] + cmd
+        
     # Set environment variables
     env = os.environ.copy()
     
@@ -693,7 +696,7 @@ def run_training(config_path, run_dir, job_name, base_model=None, gpu_id=0,
         return None
 
 
-def evaluate_model(cpdir, test_data_path, target_property, output_prefix):
+def evaluate_model(cpdir, test_data_path, target_property, material_id, output_prefix):
     """
     Evaluate trained model and generate performance metrics.
     
@@ -701,6 +704,7 @@ def evaluate_model(cpdir, test_data_path, target_property, output_prefix):
         cpdir (str): Checkpoint directory path
         test_data_path (str): Path to test LMDB dataset
         target_property (str): Target property name
+        material_id (str): material_id
         output_prefix (str): Prefix for output files
         
     Returns:
@@ -713,11 +717,13 @@ def evaluate_model(cpdir, test_data_path, target_property, output_prefix):
     print(f'Prediction path: {prd_path}')
     
     # Collect results
-    df = collect_result(test_data_path, prd_path, target=target_property, 
-                       application=False)
+    df = collect_result(test_data_path, prd_path, 
+                        target=target_property, 
+                        material_id=material_id,
+                        application=False)
     
     # Save results
-    csv_output = f'{output_prefix}_{target_property}.csv'
+    csv_output = f"{cpdir}/{output_prefix}_{target_property.replace(' ','_').replace('/','_')}.csv"
     df.to_csv(csv_output, index=False)
     print(f"Results saved to: {csv_output}")
     
@@ -733,8 +739,8 @@ def plot_performance(df, target_property, output_prefix):
         target_property (str): Target property name
         output_prefix (str): Prefix for output files
     """
-    dft_col = f'{target_property}_DFT'
-    ml_col = f'{target_property}_ML'
+    dft_col = f'{target_property} DFT'
+    ml_col = f'{target_property} ML'
     
     # Compute metrics
     r2 = r2_score(df[dft_col], df[ml_col])
@@ -773,8 +779,8 @@ def plot_performance(df, target_property, output_prefix):
     plt.tight_layout()
     
     # Save plot
-    plot_output = f'{output_prefix}_{target_property}_performance.png'
-    plt.savefig(plot_output, dpi=300, bbox_inches='tight')
+    plot_output = f"{output_prefix}_{target_property.replace(' ','_').replace('/','_')}.png"
+    plt.savefig(plot_output, bbox_inches='tight')
     print(f"Performance plot saved to: {plot_output}")
     plt.show()
     
@@ -788,10 +794,149 @@ def plot_performance(df, target_property, output_prefix):
     print(f"{'Data Points':<20}{len(df)}")
 
 
+def run_application(model_path, lmdb_path, run_dir, job_name, gpu_id=0,
+                    print_every=50, cpu_only=False, num_gpus=1):
+    """
+    Execute predicition application process using fairchem.
+    
+    Args:
+        model_path (str): Path to the model checkpoint file
+        lmdb_path (str): Path to the LMDB database containing compounds will be predicted.
+        run_dir (str): Output directory for results
+        job_name (str): Identifier for the prediction application job
+        gpu_id (int): Starting GPU device ID (for single GPU or multi-GPU)
+        print_every (int): Frequency of progress printing
+        cpu_only (bool): Whether to use CPU-only mode
+        num_gpus (int): Number of GPUs to use
+        
+    Returns:
+        str: Path to checkpoint directory
+    """
+    log_file = f"log_apply_{job_name}.txt"
+    warn_file = f"warn_apply_{job_name}.txt"
+
+    checkpoint_path = model_path
+    config_path     = model_path.replace('checkpoint.pt', '/config.yml')
+
+    # update config file for prediction application
+    shutil.copy(config_path, './config_apply.yml')
+    # read config yml file
+    with open('./config_apply.yml') as f:
+        config_yml = yaml.safe_load(f)
+    # change dir to application set
+    config_yml["dataset"]["test"]["src"] = lmdb_path
+    # get target name 
+    target = list(config_yml["dataset"]["train"]["key_mapping"].keys())[0]
+    # save back to YAML
+    with open('./config_apply.yml', "w") as f:
+        yaml.safe_dump(config_yml, f, sort_keys=False)
+        
+    # Construct training command
+    cmd = [
+        str(fairchem_main()),
+        '--mode', 'predict',
+        '--config-yml', './config_apply.yml',
+        '--run-dir', run_dir,
+        '--identifier', job_name,
+        '--print-every', str(print_every),
+        '--checkpoint', checkpoint_path,
+    ]
+    if num_gpus>1:
+        cmd = ['torchrun', '--standalone', '--nnodes=1',  '--nproc_per_node=1', ] + cmd
+        cmd += ['--num-gpus', str(num_gpus)]
+    else:
+        cmd = ['python'] + cmd
+
+    # Set environment variables
+    env = os.environ.copy()
+    
+    if not cpu_only:
+        if num_gpus == 1:
+            # Single GPU mode
+            env['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+            print(f"Using single GPU: {gpu_id}")
+        else:
+            # Multi-GPU mode: use consecutive GPUs starting from gpu_id
+            gpu_list = ','.join(str(gpu_id + i) for i in range(num_gpus))
+            env['CUDA_VISIBLE_DEVICES'] = gpu_list
+            print(f"Using multiple GPUs: {gpu_list}")
+    else:
+        # Disable CUDA for CPU-only mode
+        env['CUDA_VISIBLE_DEVICES'] = ''
+        print("Using CPU-only mode")
+    
+    # Set distributed training environment variables
+    env['MASTER_ADDR'] = 'localhost'
+    env['MASTER_PORT'] = '12355'
+    env['RANK'] = '0'
+    env['WORLD_SIZE'] = str(num_gpus) if num_gpus > 1 else '1'
+    env['LOCAL_RANK'] = '0'
+    
+    print("Environment variables:")
+    print(f"  CUDA_VISIBLE_DEVICES: "
+          f"{env.get('CUDA_VISIBLE_DEVICES', 'not set')}")
+    print(f"  WORLD_SIZE: {env.get('WORLD_SIZE')}")
+    print(f"  Distributed training: {num_gpus > 1}")
+    
+    print(f"Starting training: {job_name}")
+    print(f"Command: {' '.join(cmd)}")
+    print(f"Logs: {log_file}, {warn_file}")
+    
+    # Execute training
+    start_time = time.time()
+    
+    with open(log_file, 'w') as log_f, open(warn_file, 'w') as warn_f:
+        process = subprocess.run(
+            cmd,
+            env=env,
+            stdout=log_f,
+            stderr=warn_f,
+            text=True
+        )
+    
+    elapsed_time = time.time() - start_time
+    print(f'Prediction application completed in {elapsed_time:.1f} seconds')
+    
+    if process.returncode != 0:
+        print(f"Prediction application failed with return code {process.returncode}")
+        print(f"Check {warn_file} for error details")
+        return None
+    
+    # Extract checkpoint directory from log
+    try:
+        cpdir = None
+        with open(log_file, 'r') as f:
+            for line in f:
+                if 'checkpoint_dir:' in line:
+                    cpdir = line.split(':')[-1].strip()
+                    break
+        
+        if cpdir is None:
+            raise ValueError("Checkpoint directory not found in log")
+        
+        # Copy config to checkpoint directory
+        config_dest = os.path.join(cpdir, 'config.yml')
+        subprocess.run(['cp', config_path, config_dest], check=True)
+        
+        print(f"Checkpoint directory: {cpdir}")
+        return cpdir, target
+        
+    except Exception as e:
+        print(f"Error extracting checkpoint directory: {e}")
+        return None
+    
+
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description="Train ML model for bandgap prediction using transfer learning"
+    )
+
+    parser.add_argument(
+        '--data_dir',
+        type=str,
+        default=None,
+        help='Directory containing LMDB datasets (default: set_{target_property}_train)'
     )
     
     parser.add_argument(
@@ -802,16 +947,16 @@ def parse_args():
     )
     
     parser.add_argument(
-        '--data_dir',
+        '--material_id',
         type=str,
-        default=None,
-        help='Directory containing LMDB datasets (default: set_{target_property}_train)'
+        required=True,
+        help='material id used in data preparation step. (e.g., material_id, UUID)'
     )
     
     parser.add_argument(
         '--base_model',
         type=str,
-        default='./esen_30m_oam.pt',
+        default=None,
         help='Path to pre-trained base model'
     )
     
@@ -912,7 +1057,7 @@ def parse_args():
     parser.add_argument(
         '--fl_layer',
         type=int,
-        default=7,
+        default=None,
         help='Fine-tuning layer for transfer learning (default: 7)'
     )
     
@@ -956,16 +1101,16 @@ def parse_args():
     )
     
     parser.add_argument(
-        '--skip_training',
+        '--apply',
         action='store_true',
-        help='Skip training and only evaluate existing model'
+        help='Apply existing model to do prediction.'
     )
     
     parser.add_argument(
         '--checkpoint_dir',
         type=str,
         default=None,
-        help='Existing checkpoint directory for evaluation (used with --skip_training)'
+        help='Existing checkpoint directory.'
     )
     
     return parser.parse_args()
@@ -980,106 +1125,115 @@ def main():
     
     # Print GPU optimization summary
     print_gpu_optimization_summary(args)
-    
+
+    # replace \ and space by _
+    target_property_string = args.target_property.replace(' ','_').replace('/','_')
+
     # Set default values based on target property
     if args.data_dir is None:
         args.data_dir = f"set_{args.target_property}_train"
     
     if args.output_dir is None:
-        args.output_dir = f"result_{args.target_property}"
+        args.output_dir = f"result_{target_property_string}"
     
     if args.job_name is None:
-        args.job_name = f"{args.target_property}_MPL{args.num_layers}_TL{args.fl_layer}"
+        if not args.transfer_learning:
+            args.job_name = f"{target_property_string}_MPL{args.num_layers}"
+        elif args.fl_layer is None:
+            args.job_name = f"{target_property_string}_MPL{args.num_layers}_TL"
+        elif args.fl_layer is not None:
+            args.job_name = f"{target_property_string}_MPL{args.num_layers}_TLFL{args.fl_layer}"
     
-    # Validate inputs (skip for dryrun mode, except data_dir needed for normalization)
-    if not args.skip_training and not args.dryrun:
-        if not os.path.exists(args.base_model):
-            print(f"Error: Base model not found: {args.base_model}")
-            return
+    if not args.apply:
     
-    # Data directory is always needed (for normalization calculation)
-    if not args.skip_training and not os.path.exists(args.data_dir):
-        if args.dryrun:
-            print(f"Warning: Data directory not found: {args.data_dir}")
-            print("Automatic normalization will use default values.")
+        # Validate inputs (skip for dryrun mode, except data_dir needed for normalization)
+        if args.transfer_learning and not args.dryrun:
+            if not os.path.exists(args.base_model):
+                print(f"Error: Base model not found: {args.base_model}")
+                return
+        
+        # Data directory is always needed (for normalization calculation)
+        if not os.path.exists(args.data_dir):
+            if args.dryrun:
+                print(f"Warning: Data directory not found: {args.data_dir}")
+                print("Automatic normalization will use default values.")
+            else:
+                print(f"Error: Data directory not found: {args.data_dir}")
+                return
+        
+        print("Training Configuration:")
+        print(f"  Target Property: {args.target_property}")
+        print(f"  Data Directory: {args.data_dir}")
+        print(f"  Output Directory: {args.output_dir}")
+        print(f"  Job Name: {args.job_name}")
+        print(f"  GPU ID: {args.gpu_id}")
+        print(f"  Number of GPUs: {args.num_gpus}")
+        print(f"  Batch Size: {args.batch_size}")
+        print(f"  Max Epochs: {args.max_epochs}")
+        print(f"  Learning Rate: {args.learning_rate}")
+        print(f"  Number of Layers: {args.num_layers}")
+        print(f"  Transfer Learning: {args.transfer_learning}")
+        if args.transfer_learning:
+            print(f"  FL Layer: {args.fl_layer}")
+        print(f"  Base Model: {args.base_model}")
+        print(f"  CPU Only: {args.cpu_only}")
+        print(f"  Dry Run: {args.dryrun}")
+        
+        # Optimize batch size if requested
+        if args.auto_batch_size and not args.cpu_only:
+            print("\n" + "="*50)
+            print("BATCH SIZE OPTIMIZATION")
+            print("="*50)
+            optimal_batch_size = optimize_batch_size(
+                args.data_dir, 
+                args.max_batch_size, 
+                args.target_property
+            )
+            args.batch_size = optimal_batch_size
+            print(f"Updated batch size to: {args.batch_size}")
+        
+        # Generate configuration file (always done, even for dryrun)
+        if args.transfer_learning:
+            config_filename = (
+                f"config_{target_property_string}_MPL{args.num_layers}"
+                f"_TL{args.fl_layer}.yml"
+            )
         else:
-            print(f"Error: Data directory not found: {args.data_dir}")
+            config_filename = (
+                f"config_{target_property_string}_MPL{args.num_layers}.yml"
+            )
+        
+        config_path = config_filename
+        
+        create_config_file(
+            config_path=config_path,
+            data_dir=args.data_dir,
+            target_property=args.target_property,
+            batch_size=args.batch_size,
+            max_epochs=args.max_epochs,
+            learning_rate=args.learning_rate,
+            transfer_learning=args.transfer_learning,
+            fl_layer=args.fl_layer,
+            num_layers=args.num_layers,
+            auto_normalize=not args.disable_auto_normalize,
+            cpu_only=args.cpu_only,
+            num_gpus=args.num_gpus,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_memory,
+            manual_mean=args.manual_mean,
+            manual_stdev=args.manual_stdev
+        )
+        
+        # Exit early if dryrun mode
+        if args.dryrun:
+            print("\n" + "="*50)
+            print("DRY RUN MODE - Configuration Generated")
+            print("="*50)
+            print(f"Configuration file created: {config_path}")
+            print("Exiting without training or evaluation.")
             return
-    
-    print("Training Configuration:")
-    print(f"  Target Property: {args.target_property}")
-    print(f"  Data Directory: {args.data_dir}")
-    print(f"  Output Directory: {args.output_dir}")
-    print(f"  Job Name: {args.job_name}")
-    print(f"  GPU ID: {args.gpu_id}")
-    print(f"  Number of GPUs: {args.num_gpus}")
-    print(f"  Batch Size: {args.batch_size}")
-    print(f"  Max Epochs: {args.max_epochs}")
-    print(f"  Learning Rate: {args.learning_rate}")
-    print(f"  Number of Layers: {args.num_layers}")
-    print(f"  Transfer Learning: {args.transfer_learning}")
-    if args.transfer_learning:
-        print(f"  FL Layer: {args.fl_layer}")
-    print(f"  Base Model: {args.base_model}")
-    print(f"  CPU Only: {args.cpu_only}")
-    print(f"  Dry Run: {args.dryrun}")
-    
-    # Optimize batch size if requested
-    if args.auto_batch_size and not args.cpu_only:
-        print("\n" + "="*50)
-        print("BATCH SIZE OPTIMIZATION")
-        print("="*50)
-        optimal_batch_size = optimize_batch_size(
-            args.data_dir, 
-            args.max_batch_size, 
-            args.target_property
-        )
-        args.batch_size = optimal_batch_size
-        print(f"Updated batch size to: {args.batch_size}")
-    
-    # Generate configuration file (always done, even for dryrun)
-    if args.transfer_learning:
-        config_filename = (
-            f"config_{args.target_property}_MPL{args.num_layers}"
-            f"_TL{args.fl_layer}.yml"
-        )
-    else:
-        config_filename = (
-            f"config_{args.target_property}_MPL{args.num_layers}.yml"
-        )
-    
-    config_path = config_filename
-    
-    create_config_file(
-        config_path=config_path,
-        data_dir=args.data_dir,
-        target_property=args.target_property,
-        batch_size=args.batch_size,
-        max_epochs=args.max_epochs,
-        learning_rate=args.learning_rate,
-        transfer_learning=args.transfer_learning,
-        fl_layer=args.fl_layer,
-        num_layers=args.num_layers,
-        auto_normalize=not args.disable_auto_normalize,
-        cpu_only=args.cpu_only,
-        num_gpus=args.num_gpus,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_memory,
-        manual_mean=args.manual_mean,
-        manual_stdev=args.manual_stdev
-    )
-    
-    # Exit early if dryrun mode
-    if args.dryrun:
-        print("\n" + "="*50)
-        print("DRY RUN MODE - Configuration Generated")
-        print("="*50)
-        print(f"Configuration file created: {config_path}")
-        print("Exiting without training or evaluation.")
-        return
-    
-    # Training phase
-    if not args.skip_training:
+        
+        # Training phase
         print("\n" + "="*50)
         print("TRAINING PHASE")
         print("="*50)
@@ -1101,41 +1255,54 @@ def main():
         if cpdir is None:
             print("Training failed. Exiting.")
             return
-    else:
-        if args.checkpoint_dir is None:
-            msg = ("Error: --checkpoint_dir must be provided when using "
-                   "--skip_training")
-            print(msg)
+                
+        # Evaluation phase
+        print("\n" + "="*50)
+        print("EVALUATION PHASE")
+        print("="*50)
+        
+        # Test data path
+        test_data_path = os.path.join(args.data_dir, "test.lmdb")
+        if not os.path.exists(test_data_path):
+            print(f"Warning: Test data not found: {test_data_path}")
+            print("Skipping evaluation.")
             return
-        cpdir = args.checkpoint_dir
-    
-    # Evaluation phase
-    print("\n" + "="*50)
-    print("EVALUATION PHASE")
-    print("="*50)
-    
-    # Test data path
-    test_data_path = os.path.join(args.data_dir, "test.lmdb")
-    if not os.path.exists(test_data_path):
-        print(f"Warning: Test data not found: {test_data_path}")
-        print("Skipping evaluation.")
-        return
-    
-    # Evaluate model
-    output_prefix = "performance_test_MLIP"
-    df = evaluate_model(
-        cpdir=cpdir,
-        test_data_path=test_data_path,
-        target_property=args.target_property,
-        output_prefix=output_prefix
-    )
-    
-    # Generate performance plot
-    plot_performance(df, args.target_property, output_prefix)
-    
-    print("\nTraining and evaluation completed successfully!")
-    print(f"Results saved in: {args.output_dir}")
+        
+        # Evaluate model
+        output_prefix = "performance"
+        df = evaluate_model(
+            cpdir=cpdir,
+            test_data_path=test_data_path,
+            target_property=args.target_property,
+            material_id=args.material_id,
+            output_prefix=output_prefix
+        )
+        
+        # Generate performance plot
+        plot_performance(df, args.target_property, output_prefix)
+        
+        print("\nTraining and evaluation completed successfully!")
+        print(f"Results saved in: {args.output_dir}")
 
-
+    elif args.apply:
+        cpdir, target = run_application(
+                model_path = args.base_model, 
+                lmdb_path  = args.lmdb_path, 
+                run_dir    = args.output_dir,
+                job_name   = args.job_name + '_apply',
+                gpu_id     = args.gpu_id,
+                cpu_only   = args.cpu_only,
+                num_gpus   = args.num_gpus,
+            )
+            
+        prd_path = cpdir.replace('checkpoints', 'results') + '/ocp_predictions.npz'
+        
+        # Collect results
+        df = collect_result(args.lmdb_path, prd_path, target=target, application=True)
+        
+        # Save results
+        csv_output = f'{output_prefix}_{target}_apply.csv'
+        df.to_csv(csv_output, index=False)
+        
 if __name__ == "__main__":
     main()

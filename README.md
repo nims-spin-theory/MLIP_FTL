@@ -16,8 +16,7 @@ This repository implements frozen transfer learning for the FairChem framework, 
 
 ### Related Work
 
-This implementation and application are described in detail in our paper:
-[arXiv:2508.20556](https://arxiv.org/abs/2508.20556). 
+This implementation and application are described in detail in our paper: [arXiv:2508.20556](https://arxiv.org/abs/2508.20556). 
 
 In this paper, we also performed structure optimization and calculated formation energies and distances to the convex hull using machine learning interatomic potentials (MLIPs). For code implementing these computational tasks, please refer to our companion repository [link to be added].
 
@@ -90,6 +89,13 @@ pip install ase_db_backends
 ## Usage: Use interface scripts to train models efficiently
 This section provides examples of common workflows using interface scripts we created. These examples can provide some hand-on experience and inputs can be modified easily to fit in your research.
 
+In this example, we first train a model of formation energy from scratch and use it to predict formation energy of new compounds.
+
+Then, we use transfer learning to train a model of cirtical temperature (Curie and Neel temperatures) with the trained
+formation energy model as the base model.
+
+As last, we use transfer learning to train a model of cirtical temperature (Curie and Neel temperatures) with the eSEN-30M-OAM as the base model.
+
 First, move to the example folder:
 ``` bash
 cd examples_scripts
@@ -97,29 +103,91 @@ cd examples_scripts
 
 ### 1. Dataset Preparation
 
-The `prepare_data.py` is used to generated train/valid/test datasets for training. If you copy the example folder to other place, please update the path to scirpt accordingly. 
+The `prepare_data.py` is used to generated train/valid/test datasets for training. If you copy the example folder to other place, please update the path to `prepare_data.py` scirpt accordingly. 
 
 ```bash
-python ../scripts/prepare_data.py --csv_file my_data.csv --target_property Formation_Energy \
-                                  --split_ratios 0.8 0.1 0.1 --output_dir set_formation_train
+python prepare_data.py  --csv_file database_example_train.csv \
+                        --material_id  UUID \
+                        --target_property "formation energy (eV/atom)" \
+                        --split_ratios 0.8 0.1 0.1 
 ```
 
 For more flags available, please do `python prepare_data.py -h` for help information.
 
-### 2. Training from Scratch
+### 2. Training model of formation enerngy from Scratch
 
+Train on single GPU:
 ```bash
-python train.py \
-   --target_property Formation_Energy \
-   --transfer_learning \
-   --fl_layer 5 \
+python train.py --data_dir "set_formation_energy_(eV_atom)_train" \
+                --material_id  UUID \
+                --target_property "formation energy (eV/atom)" \
+                --num_layers 3 --max_epochs 5 
 ```
 
+Train on 2 GPU:
+```bash
+python train.py --data_dir "set_formation_energy_(eV_atom)_train" \
+                --material_id  UUID \
+                --target_property "formation energy (eV/atom)" \
+                --num_layers 3 --max_epochs 5 \
+                --num_gpu 2
+```
+
+Train on CPU only:
+```bash
+python train.py --data_dir "set_formation_energy_(eV_atom)_train" \
+                --material_id  UUID \
+                --target_property "formation energy (eV/atom)" \
+                --num_layers 3 --max_epochs 5 \
+                --cpu_only
+```
+
+Apply trained model to predict property of compounds:
+```bash
+python train.py --apply \
+                --model_path "result_formation_energy_(eV_atom)/checkpoints/2025-10-28-19-42-08-formation_energy_(eV_atom)_MPL5/checkpoint.pt"  \
+                --lmdb_path "set_apply/apply.lmdb" \
+                --material_id UUID      \
+```
+
+
 ### 3. Transfer Learning: Formation Energy → Critical Temperature
+Prepare train/valid/test datasets for training model of critial temperature.
+```bash
+python prepare_data.py  --csv_file database_example_trainTL.csv \
+                        --material_id  UUID \
+                        --target_property "Tc (K)(KKR-FULL)" \
+                        --split_ratios 0.8 0.1 0.1 
+```
+
+Use transfer learning train a model of critial temperature. Please update the path to the formation energy model
+checkpoint file accordingly.
+
+```bash
+python train.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
+                --material_id  UUID \
+                --target_property "Tc (K)(KKR-FULL)" \
+                --num_layers 5 --max_epochs 100 \
+                --transfer_learning \
+                --fl_layer 2 \
+                --base_model "result_formation_energy_(eV_atom)/checkpoints/2025-10-28-19-42-08-formation_energy_(eV_atom)_MPL5/checkpoint.pt" 
+```
 
 ### 4. Transfer Learning: MLIP → Critical Temperature
+**Prerequisites**: This example requires the OMAT24 `eSEN-30M-OAM` MLIP model. Please download `esen_30m_oam.pt` from [here](https://huggingface.co/facebook/OMAT24/blob/main/esen_30m_oam.pt) and place it in the example folder before proceeding.
 
-For more flags available, please do `python train.py -h` for help information.
+```bash
+python train.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
+                --material_id  UUID \
+                --target_property "Tc (K)(KKR-FULL)" \
+                --num_layers 10 --max_epochs 100 \
+                --transfer_learning \
+                --fl_layer 7 \
+                --base_model "./esen_30m_oam.pt" 
+```
+
+For more flags available, please do `python prepare_data.py -h` and `python train.py -h` 
+for help information.
 
 
 ## Usage: step-by-step instruction

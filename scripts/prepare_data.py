@@ -1,13 +1,18 @@
 #!/usr/bin/env python
 """
 This script processes crystal structure data and prepares 
-training/validation/test datasets in LMDB format for machine learning models.
+##1 training/validation/test datasets in LMDB format for model training.
+##2 apply datasets in LMDB format for prediction application using trained model.
+
 
 Usage examples:
     
-    # data paths, target property, and split ratios
+    # data paths, target property, and split ratios for training
     python prepare_data.py --csv_file my_data.csv --target_property Formation_Energy
                            --split_ratios 0.8 0.1 0.1
+
+    # data paths for prediction application
+    python prepare_data.py --csv_file my_data.csv --apply
     
     # Limit dataset size for testing or quick processing by -max_samples flag.
     python prepare_data.py ... --max_samples 1000 
@@ -38,7 +43,7 @@ from ase.io import read
 from pymatgen.core import Lattice, Structure
 from fairchem.core.preprocessing import AtomsToGraphs
 from fairchem.core.datasets import LmdbDataset
-
+from pymatgen.io.ase import AseAtomsAdaptor
 
 
 # Utility functions for data processing
@@ -412,68 +417,73 @@ def validate_lmdb_database(lmdb_path, max_samples_to_check=10):
         return False
 
 
-def db_to_atomslist(compounds_df, dir_poscar='structures_poscar', 
-                    properties=None):
+def db_to_atomslist(compounds_df, material_id_col, properties,  dir_poscar=None, ):
     """
     Convert pandas DataFrame to list of ASE atoms objects.
     
     Args:
         compounds_df (pd.DataFrame): DataFrame containing materials data
         dir_poscar (str): Directory containing POSCAR/VASP files
+                          if None, structures are read from the csv file
+                          defined by "cell", "positions", and "numbers"
         properties (dict): Property names mapping
         
     Returns:
         list: List of ASE atoms objects with attached properties
     """
-    if properties is None:
-        properties = {'material_id': 'material_id'}
     
     atoms_list = []
     skipped_count = 0
     
     print(f"Processing {len(compounds_df)} compounds...")
     
-    for i in tqdm(compounds_df.index, desc="Loading structures"):
+    for i in tqdm(compounds_df.index, desc="Loading structures"):        
         try:
-            material_id = compounds_df.loc[i]['material_id']
+            material_id = compounds_df.loc[i][material_id_col]
             
             # Convert material_id to string if it's numeric
             material_id_str = str(material_id)
             
-            # Construct structure file path
-            if 'mp-' not in material_id_str:
-                structure_file = os.path.join(dir_poscar, f'mp-{material_id_str}.vasp')
+            # read structure from POSCAR files
+            if dir_poscar is not None:
+                # Construct structure file path
+                if 'mp-' not in material_id_str:
+                    structure_file = os.path.join(dir_poscar, f'mp-{material_id_str}.vasp')
+                else:
+                    structure_file = os.path.join(dir_poscar, f'{material_id_str}.vasp')
+                
+                # Check if structure file exists
+                if not os.path.exists(structure_file):
+                    print(f"Warning: Structure file not found: {structure_file}")
+                    skipped_count += 1
+                    continue
+                
+                # Read structure
+                try:
+                    atoms = read(structure_file)
+                except Exception as e:
+                    print(f"Warning: Failed to read structure {structure_file}: {e}")
+                    skipped_count += 1
+                    continue
+            # read structure within the csv file stored as "cell", "positions", and "numbers"
             else:
-                structure_file = os.path.join(dir_poscar, f'{material_id_str}.vasp')
-            
-            # Check if structure file exists
-            if not os.path.exists(structure_file):
-                print(f"Warning: Structure file not found: {structure_file}")
-                skipped_count += 1
-                continue
-            
-            # Read structure
-            try:
-                atoms = read(structure_file)
-            except Exception as e:
-                print(f"Warning: Failed to read structure {structure_file}: {e}")
-                skipped_count += 1
-                continue
+                struc = get_structure(compounds_df.loc[i])  # convert row to pymatgen structure format
+                atoms = AseAtomsAdaptor.get_atoms(struc)    # convert to ASE atoms format
             
             # Validate structure
             if atoms is None:
-                print(f"Warning: None atoms object from {structure_file}")
+                print(f"Warning: None atoms object from {material_id_str}")
                 skipped_count += 1
                 continue
             
             if len(atoms) == 0:
-                print(f"Warning: Empty atoms object from {structure_file}")
+                print(f"Warning: Empty atoms object from {material_id_str}")
                 skipped_count += 1
                 continue
             
             # Check for valid positions
             if not hasattr(atoms, 'positions') or atoms.positions is None:
-                print(f"Warning: Invalid positions in {structure_file}")
+                print(f"Warning: Invalid positions in {material_id_str}")
                 skipped_count += 1
                 continue
             
@@ -512,7 +522,7 @@ def db_to_atomslist(compounds_df, dir_poscar='structures_poscar',
             print(f"Warning: Error processing compound at index {i}: {e}")
             skipped_count += 1
             continue
-    
+
     if skipped_count > 0:
         print(f"Skipped {skipped_count} invalid compounds")
     
@@ -568,7 +578,7 @@ def parse_args():
     parser.add_argument(
         '--poscar_dir',
         type=str, 
-        default='QSGW_dataset/structures_poscar',
+        default=None,
         help='Directory containing POSCAR/VASP structure files'
     )
     
@@ -578,11 +588,16 @@ def parse_args():
         default=None,
         help='Output directory for LMDB databases (default: set_{target_property}_train)'
     )
+
+    parser.add_argument(
+        '--material_id',
+        type=str,
+        help='Target property name to predict'
+    )
     
     parser.add_argument(
         '--target_property',
         type=str,
-        default='2shot',
         help='Target property name to predict'
     )
     
@@ -613,6 +628,12 @@ def parse_args():
         action='store_true',
         help='Skip dataset analysis and visualization'
     )
+
+    parser.add_argument(
+        '--apply',
+        action='store_true',
+        help='Prepare the data for prediction application, ie no split'
+    )
     
     return parser.parse_args()
 
@@ -624,19 +645,21 @@ def main():
     args = parse_args()
     
     # Set default output_dir based on target_property if not provided
-    if args.output_dir is None:
-        args.output_dir = f"set_{args.target_property}_train"
-    
+    if args.output_dir is None and not args.apply:
+        args.output_dir = f"set_{args.target_property.replace(' ','_').replace('/','_')}_train"
+    elif args.output_dir is None and args.apply:
+        args.output_dir = f"set_apply"
+
     # Validate split ratios
-    if abs(sum(args.split_ratios) - 1.0) > 1e-6:
+    if abs(sum(args.split_ratios) - 1.0) > 1e-6 and not args.apply:
         print("Error: Split ratios must sum to 1.0")
         return
     
+    # store material id for cenvience.
+    properties = {args.material_id    : args.material_id}
     # Target properties to extract
-    properties = {
-        "material_id": "material_id",
-        args.target_property: args.target_property
-    }
+    if not args.apply:
+        properties[args.target_property] = args.target_property
     
     print("Loading dataset...")
     try:
@@ -645,7 +668,7 @@ def main():
     except FileNotFoundError:
         print(f"Error: CSV file not found: {args.csv_file}")
         return
-    
+
     # Limit dataset size if specified
     if args.max_samples is not None and args.max_samples > 0:
         if args.max_samples < len(compounds_df):
@@ -665,9 +688,11 @@ def main():
         else:
             print(f"Requested max_samples ({args.max_samples}) >= "
                   f"dataset size ({len(compounds_df)}), using all samples")
-    
+
     # Display basic statistics about the target property
-    if args.target_property in compounds_df.columns:
+    if args.apply:
+        print(f"Generating the lmbd dataset for prediction application.")
+    elif args.target_property in compounds_df.columns:
         prop_values = compounds_df[args.target_property].dropna()
         if len(prop_values) > 0:
             print(f"\n{args.target_property} statistics:")
@@ -679,22 +704,26 @@ def main():
         else:
             print(f"Warning: No valid values found for {args.target_property}")
     else:
-        print(f"Warning: Target property '{args.target_property}' "
+        print(f"Warning: Generate lmdb dataset for training."
+              f"However, target property {args.target_property} "
               f"not found in CSV")
-    
+
     print("\nConverting to atoms list...")
     atoms_list = db_to_atomslist(compounds_df, dir_poscar=args.poscar_dir, 
-                                 properties=properties)
+                                 properties=properties, material_id_col=args.material_id)
     print(f"Successfully converted {len(atoms_list)} structures")
     
     if len(atoms_list) == 0:
         print("No structures were loaded. Check your data paths.")
         return
     
-    print("Splitting dataset...")
-    split_set = split_dataset(atoms_list, ratio=args.split_ratios,
-                              seed=args.seed)
-    
+    if not args.apply:
+        print("Splitting dataset...")
+        split_set = split_dataset(atoms_list, ratio=args.split_ratios,
+                                seed=args.seed)
+    else:
+        split_set  = {'apply' : atoms_list}
+
     # Print split information
     print(f"{'Set name':<15}{'Set size':>10}")
     print("-" * 25)
@@ -707,7 +736,7 @@ def main():
     # Validate created LMDB databases
     print("\nValidating created LMDB databases...")
     validation_passed = True
-    for split_name in ['train', 'val', 'test']:
+    for split_name in split_set.keys():
         lmdb_path = f"{args.output_dir}/{split_name}.lmdb"
         if not validate_lmdb_database(lmdb_path):
             validation_passed = False
@@ -717,18 +746,17 @@ def main():
     else:
         print("✓ All databases passed validation")
     
-    if not args.no_analysis:
+    if not args.no_analysis and not args.apply:
         print("Analyzing dataset statistics...")
-        
+
         # Analyze each split
-        for split_name in ['train', 'val', 'test']:
+        for split_name in split_set.keys():
             lmdb_path = f"{args.output_dir}/{split_name}.lmdb"
             print(f"\n{split_name.upper()} set statistics:")
             analyze_dataset_statistics(lmdb_path, args.target_property)
     
     print(f"\nDataset preparation complete! "
           f"Output saved to: {args.output_dir}")
-
 
 if __name__ == "__main__":
     main()
