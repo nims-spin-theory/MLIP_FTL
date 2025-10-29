@@ -156,7 +156,7 @@ python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
                 --material_id  UUID \
                 --target_property "formation energy (eV/atom)" \
                 --num_layers 5 --max_epochs 50 \
-                --num_gpu 2
+                --num_gpus 2
 ```
 
 **CPU-only training**
