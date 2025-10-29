@@ -35,7 +35,7 @@ Before getting started, please ensure you have the following installed:
 ```bash
 git clone [this_repo]
 cd fairchem
-git checkout dev/enda  # Switch to the transfer learning branch
+git checkout dev/TL  # Switch to the transfer learning branch
 ```
 
 2. **Set up the environment**:
@@ -90,7 +90,7 @@ pip install ase_db_backends
 
 ## Usage Example: Quick Start with Interface Scripts
 
-This section shows common workflows using our interface scripts. These examples provide hands-on experience and can be adapted for your research needs.
+This section shows common workflows using our interface scripts in `scripts` folder. These examples provide hands-on experience and can be adapted for your research needs.
 
 **Workflow Overview:**
 
@@ -109,7 +109,7 @@ cd examples_scripts
 The `prepare_data.py` script converts your dataset into the format required for training. If you copy the examples folder elsewhere, please update the path to the `prepare_data.py` script accordingly.
 
 ```bash
-python prepare_data.py  --csv_file database_example_train.csv \
+python ../scripts/prepare_data.py  --csv_file database_example_train.csv \
                         --material_id  UUID \
                         --target_property "formation energy (eV/atom)" \
                         --split_ratios 0.8 0.1 0.1
@@ -136,7 +136,7 @@ For complete information on available parameters, run `python prepare_data.py -h
 
 **Single GPU training**
 ```bash
-python train.py --data_dir "set_formation_energy_(eV_atom)_train" \
+python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
                 --material_id  UUID \
                 --target_property "formation energy (eV/atom)" \
                 --num_layers 3 --max_epochs 50
@@ -149,12 +149,10 @@ python train.py --data_dir "set_formation_energy_(eV_atom)_train" \
 
 The training process outputs detailed information explaining each procedure step. Model performance is evaluated using the test set (data not seen during training) and visualized in a generated PNG figure. Upon completion, the script provides the trained model checkpoint path and exports test results to a CSV file.
 
-For complete information on available parameters, run python python train.py -h.
-
 **Multi-GPU training**
 
 ```bash
-python train.py --data_dir "set_formation_energy_(eV_atom)_train" \
+python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
                 --material_id  UUID \
                 --target_property "formation energy (eV/atom)" \
                 --num_layers 3 --max_epochs 50 \
@@ -163,7 +161,7 @@ python train.py --data_dir "set_formation_energy_(eV_atom)_train" \
 
 **CPU-only training**
 ```bash
-python train.py --data_dir "set_formation_energy_(eV_atom)_train" \
+python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
                 --material_id  UUID \
                 --target_property "formation energy (eV/atom)" \
                 --num_layers 3 --max_epochs 50 \
@@ -172,25 +170,49 @@ python train.py --data_dir "set_formation_energy_(eV_atom)_train" \
 
 **Apply the trained model for predictions**:
 
-**Need to add cmd for data preparation here.**
+First, prepare the LMDB file containing the structures for prediction. The `--apply` flag specifies prediction application mode:
 
 ```bash
-python train.py --apply \
+python ../scripts/prepare_data.py  --csv_file database_example_apply.csv \
+                  --material_id  UUID \
+                  --apply
+```
+Then apply the trained model to make predictions:
+
+```bash
+python ../scripts/train.py --apply \
                 --model_path "result_formation_energy_(eV_atom)/checkpoints/2025-10-28-19-42-08-formation_energy_(eV_atom)_MPL5/checkpoint.pt" \
                 --lmdb_path "set_apply/apply.lmdb" \
                 --material_id UUID
 ```
-**Key Parameters:**
+
 - `--apply`: Specifies the prediction application mode
 - `--model_path`: Specifies the path to the trained model checkpoint file
 - `--lmdb_path`: Specifies the path to the LMDB file containing compounds for prediction
+
+The script provides the path to output at the end.
+
+#### Tips
+
+**Customizing Output Settings**
+
+You can customize the output directory and job name using the `--output_dir` and `--job_name` flags. If not specified, these will be automatically generated based on the target property name, as demonstrated in the examples above.
+
+**Selecting GPU Device**
+
+If multiple GPUs are available, you can specify which GPU to use with the `--gpu-id` flag. The script displays available GPU information at startup.
+
+**Other Available Parameters**
+
+For complete information on available parameters, run `python python train.py -h`.
+
 
 ### 3. Transfer Learning: Formation Energy → Critical Temperature
 
 First, prepare the dataset for critical temperature training:
 
 ```bash
-python prepare_data.py  --csv_file database_example_trainTL.csv \
+python ../scripts/prepare_data.py  --csv_file database_example_trainTL.csv \
                         --material_id  UUID \
                         --target_property "Tc (K)(KKR-FULL)" \
                         --split_ratios 0.8 0.1 0.1
@@ -199,7 +221,7 @@ python prepare_data.py  --csv_file database_example_trainTL.csv \
 Now train the critical temperature model using transfer learning. Make sure to update the path to your formation energy model checkpoint:
 
 ```bash
-python train.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
+python ../scripts/train.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
                 --material_id  UUID \
                 --target_property "Tc (K)(KKR-FULL)" \
                 --num_layers 5 --max_epochs 100 \
@@ -219,7 +241,7 @@ python train.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
 **Prerequisites**: This example requires the OMAT24 `eSEN-30M-OAM` MLIP model. Please download `esen_30m_oam.pt` from the [OMAT24 Hugging Face repository](https://huggingface.co/facebook/OMAT24/blob/main/esen_30m_oam.pt) and place it in the examples folder before proceeding.
 
 ```bash
-python train.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
+python ../scripts/train.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
                 --material_id  UUID \
                 --target_property "Tc (K)(KKR-FULL)" \
                 --num_layers 10 --max_epochs 100 \
