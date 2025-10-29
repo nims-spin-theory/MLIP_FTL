@@ -714,7 +714,7 @@ def evaluate_model(cpdir, test_data_path, target_property, material_id, output_p
     prd_path = cpdir.replace('checkpoints', 'results') + '/ocp_predictions.npz'
     
     print(f'Test set path: {test_data_path}')
-    print(f'Prediction path: {prd_path}')
+    # print(f'Test set Prediction result path: {prd_path}')
     
     # Collect results
     df = collect_result(test_data_path, prd_path, 
@@ -725,7 +725,7 @@ def evaluate_model(cpdir, test_data_path, target_property, material_id, output_p
     # Save results
     csv_output = f"{cpdir}/{output_prefix}_{target_property.replace(' ','_').replace('/','_')}.csv"
     df.to_csv(csv_output, index=False)
-    print(f"Results saved to: {csv_output}")
+    print(f"Test set results saved to: {csv_output}")
     
     return df
 
@@ -817,7 +817,7 @@ def run_application(model_path, lmdb_path, run_dir, job_name, gpu_id=0,
 
     checkpoint_path = model_path
     config_path     = model_path.replace('checkpoint.pt', '/config.yml')
-
+    
     # update config file for prediction application
     shutil.copy(config_path, './config_apply.yml')
     # read config yml file
@@ -876,9 +876,9 @@ def run_application(model_path, lmdb_path, run_dir, job_name, gpu_id=0,
     print(f"  CUDA_VISIBLE_DEVICES: "
           f"{env.get('CUDA_VISIBLE_DEVICES', 'not set')}")
     print(f"  WORLD_SIZE: {env.get('WORLD_SIZE')}")
-    print(f"  Distributed training: {num_gpus > 1}")
+    print(f"  Distributed prediction process: {num_gpus > 1}")
     
-    print(f"Starting training: {job_name}")
+    print(f"Starting prediction: {target}")
     print(f"Command: {' '.join(cmd)}")
     print(f"Logs: {log_file}, {warn_file}")
     
@@ -918,8 +918,8 @@ def run_application(model_path, lmdb_path, run_dir, job_name, gpu_id=0,
         config_dest = os.path.join(cpdir, 'config.yml')
         subprocess.run(['cp', config_path, config_dest], check=True)
         
-        print(f"Checkpoint directory: {cpdir}")
-        return cpdir, target
+        print(f"The model used: {checkpoint_path}")
+        return cpdir
         
     except Exception as e:
         print(f"Error extracting checkpoint directory: {e}")
@@ -942,7 +942,6 @@ def parse_args():
     parser.add_argument(
         '--target_property',
         type=str,
-        required=True,
         help='Target property name (e.g., 2shot, LDA)'
     )
     
@@ -957,7 +956,7 @@ def parse_args():
         '--base_model',
         type=str,
         default=None,
-        help='Path to pre-trained base model'
+        help='Path to pre-trained base model checkpoint file'
     )
     
     parser.add_argument(
@@ -978,7 +977,7 @@ def parse_args():
         '--gpu_id',
         type=int,
         default=0,
-        help='GPU device ID (for single GPU mode)'
+        help='GPU device ID (for single GPU mode) or starting GPU id for multiple GPU'
     )
     
     parser.add_argument(
@@ -1107,10 +1106,17 @@ def parse_args():
     )
     
     parser.add_argument(
-        '--checkpoint_dir',
+        '--model_path',
         type=str,
         default=None,
-        help='Existing checkpoint directory.'
+        help='path to trained model checkpoint file'
+    )
+
+    parser.add_argument(
+        '--lmdb_path',
+        type=str,
+        default=None,
+        help='lmdb_path to the compounds for predction application.'
     )
     
     return parser.parse_args()
@@ -1126,25 +1132,24 @@ def main():
     # Print GPU optimization summary
     print_gpu_optimization_summary(args)
 
-    # replace \ and space by _
-    target_property_string = args.target_property.replace(' ','_').replace('/','_')
-
-    # Set default values based on target property
-    if args.data_dir is None:
-        args.data_dir = f"set_{args.target_property}_train"
-    
-    if args.output_dir is None:
-        args.output_dir = f"result_{target_property_string}"
-    
-    if args.job_name is None:
-        if not args.transfer_learning:
-            args.job_name = f"{target_property_string}_MPL{args.num_layers}"
-        elif args.fl_layer is None:
-            args.job_name = f"{target_property_string}_MPL{args.num_layers}_TL"
-        elif args.fl_layer is not None:
-            args.job_name = f"{target_property_string}_MPL{args.num_layers}_TLFL{args.fl_layer}"
-    
     if not args.apply:
+        # replace \ and space by _
+        target_property_string = args.target_property.replace(' ','_').replace('/','_')
+
+        # Set default values based on target property
+        if args.data_dir is None:
+            args.data_dir = f"set_{args.target_property}_train"
+        
+        if args.output_dir is None:
+            args.output_dir = f"result_{target_property_string}"
+        
+        if args.job_name is None:
+            if not args.transfer_learning:
+                args.job_name = f"{target_property_string}_MPL{args.num_layers}"
+            elif args.fl_layer is None:
+                args.job_name = f"{target_property_string}_MPL{args.num_layers}_TL"
+            elif args.fl_layer is not None:
+                args.job_name = f"{target_property_string}_MPL{args.num_layers}_TLFL{args.fl_layer}"
     
         # Validate inputs (skip for dryrun mode, except data_dir needed for normalization)
         if args.transfer_learning and not args.dryrun:
@@ -1285,11 +1290,28 @@ def main():
         print(f"Results saved in: {args.output_dir}")
 
     elif args.apply:
-        cpdir, target = run_application(
-                model_path = args.base_model, 
+        print("Using trained model to do prediction. \n")
+
+        # get target name 
+        config_path     = args.model_path.replace('checkpoint.pt', '/config.yml')
+        with open(config_path) as f:
+            config_yml = yaml.safe_load(f)
+            target_property = list(config_yml["dataset"]["train"]["key_mapping"].keys())[0]
+
+        # replace \ and space by _
+        target_property_string = target_property.replace(' ','_').replace('/','_')
+        
+        if args.output_dir is None:
+            args.output_dir = f"result_{target_property_string}_apply"
+        
+        if args.job_name is None:
+            args.job_name = "predict"
+
+        cpdir = run_application(
+                model_path = args.model_path, 
                 lmdb_path  = args.lmdb_path, 
                 run_dir    = args.output_dir,
-                job_name   = args.job_name + '_apply',
+                job_name   = args.job_name,
                 gpu_id     = args.gpu_id,
                 cpu_only   = args.cpu_only,
                 num_gpus   = args.num_gpus,
@@ -1298,11 +1320,15 @@ def main():
         prd_path = cpdir.replace('checkpoints', 'results') + '/ocp_predictions.npz'
         
         # Collect results
-        df = collect_result(args.lmdb_path, prd_path, target=target, application=True)
+        df = collect_result(args.lmdb_path, prd_path, 
+                            target=target_property, material_id=args.material_id,
+                            application=True)
         
         # Save results
-        csv_output = f'{output_prefix}_{target}_apply.csv'
+        csv_output = cpdir.replace('checkpoints','results')
+        csv_output = csv_output + f'/predict_{target_property_string}.csv'
         df.to_csv(csv_output, index=False)
+        print(f"The output stored at: {csv_output}.")
         
 if __name__ == "__main__":
     main()
