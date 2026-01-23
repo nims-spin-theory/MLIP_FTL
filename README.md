@@ -1,12 +1,12 @@
-# FairChem Frozen Transfer Learning Implementation
-
-[![arXiv](https://img.shields.io/badge/arXiv-2508.20556-b31b1b.svg)](https://arxiv.org/abs/2508.20556)
-[![Python](https://img.shields.io/badge/python-3.9-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.md)
+# FairChem v1 Frozen Transfer Learning Implementation
 
 ## Overview
 
-This repository provides a framework for frozen transfer learning in materials science, specifically designed for the eSEN (equivariant Smooth Energy Network) model. The implementation allows you to adopt pre-trained models, includining pretrained machine learning interatomic potentials (MLIPs), for other properties, reducing  dataset size requirements while maintaining good performance. 
+This repository provides a user-friendly interface and modification to FairChem v1 that lets you train machine learning models either from scratch or using transfer learning. Getting started is straightforward. For training, the code needs a CSV file containing crystal structures and the target property. For prediction with a trained model, a CSV file with the crystal structures of the compounds to evaluate is needed.
+
+A key feature is the implementation of frozen transfer learning for the eSEN (equivariant Smooth Energy Network) model. This approach lets you reuse pre-trained models—including universal machine-learning interatomic potentials (uMLIPs)—to develop models for new properties, reducing the amount of training data required while maintaining strong performance. We refer to this repo as `MLIP-FTL`, and distinguish it from our companion package `MLIP-HOT`, which directly employs MLIPs for structure optimization, formation energy, and convex-hull distance calculations.
+
+This repository is a modified fork of the FairChem v1 repository, branched from commit `d4dd224a0c2fdfab6bab550f6cc6463a9c29d48d`.
 
 ### Key Features
 
@@ -18,7 +18,7 @@ This repository provides a framework for frozen transfer learning in materials s
 
 This implementation and its applications are described in our research paper: [arXiv:2508.20556](https://arxiv.org/abs/2508.20556).
 
-This paper also includes structure optimization and formation energy calculations, as well as distances to the convex hull using machine learning interatomic potentials (MLIPs). For the code for these tasks, please visit our companion repository [link to be added].
+This paper also includes structure optimization, formation energy calculations, and distances to the convex hull using MLIPs. For the code for these tasks, please visit our companion repository of `MLIP-HOT` [link to be added].
 
 ## Installation
 
@@ -88,25 +88,25 @@ pip install ase_db_backends
 ```
 
 
-## Usage Example: Quick Start with Interface Scripts
+## Usage
 
-This section shows common workflows using our interface scripts in `scripts` folder. These examples provide hands-on experience and can be adapted for your research needs.
+This section shows three common workflows using our interface scripts in `scripts` folder. These examples provide hands-on experience and can be adapted for your research needs.
 
-**Workflow Overview:**
+**Workflows Overview:**
 
-1. **Train from scratch**: Build a formation energy model and use it for predictions
+1. **Train from scratch**: Build a formation energy model from scratch and use it for predictions
 2. **Transfer learning (Model → Model)**: Train a critical temperature model using the formation energy model as base
 3. **Transfer learning (MLIP → Model)**: Train a critical temperature model using the pre-trained eSEN-30M-OAM MLIP as base
 
-First, navigate to the examples folder containing input csv files:
+First, navigate to the examples folder containing example input csv files:
 
 ```bash
 cd examples_scripts
 ```
 
-### 1. Dataset Preparation
+#### 1. Dataset Preparation
 
-The `prepare_data.py` script converts your dataset into the format required for training. If you copy the examples folder elsewhere, please update the path to the `prepare_data.py` script accordingly.
+The `prepare_data.py` script converts `csv` file of dataset into the `lmdb` format required by `FairChem`. If you copy the examples folder elsewhere, please update the path to the `prepare_data.py` script accordingly.
 
 ```bash
 python ../scripts/prepare_data.py  --csv_file database_example_train.csv \
@@ -118,25 +118,26 @@ python ../scripts/prepare_data.py  --csv_file database_example_train.csv \
 The `--csv_file` flag specifies the input CSV file containing the training dataset. The file must include the following columns:
 
 1. **Structure definition columns** (fixed names):
-   - `cell`: Unit cell parameters
-   - `positions`: Atomic positions
-   - `numbers`: Atomic numbers
+   - **cell**: 3×3 matrix as list `[[a1,a2,a3], [b1,b2,b3], [c1,c2,c3]]`
+   - **positions**: Nx3 matrix as list containing fractional coordinates `[[atom1x,atom1y,atom1z], [atom2x,atom2y,atom2z]...]`
+   - **numbers**:   N length list containing atomic numbers `[atom1,atom2,...]` 
+
 
 2. **Property and identifier columns** (customizable names):
-   - Target property column: Contains the values you want to predict
-   - Material ID column: Contains unique identifiers (formulas, UUIDs, or labels)
+   - Target property column: target property values
+   - Material ID column: compound identifiers (formulas, UUIDs, or labels)
 
-The target property and material ID column names are arbitrary and should match the values passed to the `--target_property` and `--material_id` flags respectively.
+The target property and material ID column names are arbitrary and should match the values passed to the `--target_property` and `--material_id` flags respectively. Please refer to the example CSV files for the format requirements.
 
-Please refer to the example CSV files for the format requirements.
+This will generate a folder contians the train/val/text dataset for model training and evaluation in the next step. In this example, the folder name is `set_formation_energy_(eV_atom)_train`.  The output dir can be set using flag `--output_dir`.
 
 For complete information on available parameters, run `python prepare_data.py -h`.
 
-### 2. Training Formation Energy Model from Scratch
+#### 2. Training Formation Energy Model from Scratch
 
 **Single GPU training**
 ```bash
-python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
+python ../scripts/MLIP_FTL.py --data_dir "set_formation_energy_(eV_atom)_train" \
                 --material_id  UUID \
                 --target_property "formation energy (eV/atom)" \
                 --num_layers 5 --max_epochs 50
@@ -147,12 +148,16 @@ python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
 - `--num_layers`: Specifies the number of message-passing layers within the model
 - `--max_epochs`: Specifies the number of training epochs
 
-The training process outputs detailed information explaining each procedure step. Model performance is evaluated using the test set (data not seen during training) and visualized in a generated PNG figure. Upon completion, the script provides the trained model checkpoint path and exports test results to a CSV file.
+The training process outputs detailed information explaining each procedure step. Upon completion, the script provides the trained model checkpoint path and exports test results to a CSV file. Model performance is evaluated using the test set (data not seen during training) and visualized in a generated PNG figure: 
+
+<p align="center">
+  <img src="./examples_scripts/output/performance_formation_energy_(eV_atom).png" alt="Formation energy performance" width="300">
+</p>
 
 **Multi-GPU training**
 
 ```bash
-python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
+python ../scripts/MLIP_FTL.py --data_dir "set_formation_energy_(eV_atom)_train" \
                 --material_id  UUID \
                 --target_property "formation energy (eV/atom)" \
                 --num_layers 5 --max_epochs 50 \
@@ -161,7 +166,7 @@ python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
 
 **CPU-only training**
 ```bash
-python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
+python ../scripts/MLIP_FTL.py --data_dir "set_formation_energy_(eV_atom)_train" \
                 --material_id  UUID \
                 --target_property "formation energy (eV/atom)" \
                 --num_layers 5 --max_epochs 50 \
@@ -170,7 +175,7 @@ python ../scripts/train.py --data_dir "set_formation_energy_(eV_atom)_train" \
 
 **Apply the trained model for predictions**:
 
-First, prepare the LMDB file containing the structures for prediction. The `--apply` flag specifies prediction application mode:
+First, prepare the LMDB file containing the structures for prediction. The `--apply` flag specifies prediction application mode. The default output dir is `set_apply`. The output dir can be set using flag `--output_dir`.
 
 ```bash
 python ../scripts/prepare_data.py  --csv_file database_example_apply.csv \
@@ -180,7 +185,7 @@ python ../scripts/prepare_data.py  --csv_file database_example_apply.csv \
 Then apply the trained model to make predictions:
 
 ```bash
-python ../scripts/train.py --apply \
+python ../scripts/MLIP_FTL.py --apply \
                 --model_path "result_formation_energy_(eV_atom)/checkpoints/2025-10-28-19-42-08-formation_energy_(eV_atom)_MPL5/checkpoint.pt" \
                 --lmdb_path "set_apply/apply.lmdb" \
                 --material_id UUID
@@ -190,9 +195,9 @@ python ../scripts/train.py --apply \
 - `--model_path`: Specifies the path to the trained model checkpoint file
 - `--lmdb_path`: Specifies the path to the LMDB file containing compounds for prediction
 
-The script provides the path to output at the end.
+The script provides the path to output at the end. The output dir can be set using flag `--output_dir`.
 
-#### Tips
+##### Tips
 
 **Customizing Output Settings**
 
@@ -204,10 +209,10 @@ If multiple GPUs are available, you can specify which GPU to use with the `--gpu
 
 **Other Available Parameters**
 
-For complete information on available parameters, run `python python train.py -h`.
+For complete information on available parameters, run `python python MLIP_FTL.py -h`.
 
 
-### 3. Transfer Learning: Formation Energy → Critical Temperature
+#### 3. Transfer Learning: Formation Energy → Critical Temperature
 
 First, prepare the dataset for critical temperature training:
 
@@ -218,10 +223,10 @@ python ../scripts/prepare_data.py  --csv_file database_example_trainTL.csv \
                         --split_ratios 0.8 0.1 0.1
 ```
 
-Now train the critical temperature model using transfer learning. Make sure to update the path to your formation energy model checkpoint:
+Now train the critical temperature model using transfer learning. Please update the path to your formation energy model checkpoint:
 
 ```bash
-python ../scripts/train.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
+python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
                 --material_id  UUID \
                 --target_property "Tc (K)(KKR-FULL)" \
                 --num_layers 5 --max_epochs 100 \
@@ -229,6 +234,7 @@ python ../scripts/train.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
                 --fl_layer 2 \
                 --base_model "result_formation_energy_(eV_atom)/checkpoints/2025-10-28-19-42-08-formation_energy_(eV_atom)_MPL5/checkpoint.pt"
 ```
+Without `--fl_layer` flag, All layers are updated in the training process.
 
 **Key Parameters:**
 - `--transfer_learning`: Enables transfer learning mode
@@ -236,12 +242,12 @@ python ../scripts/train.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
 - `--fl_layer`: Specifies the number of frozen layers (layers that remain unchanged during training)
 
 
-### 4. Transfer Learning: MLIP → Critical Temperature
+#### 4. Transfer Learning: MLIP → Critical Temperature
 
 **Prerequisites**: This example requires the OMAT24 `eSEN-30M-OAM` MLIP model. Please download `esen_30m_oam.pt` from the [OMAT24 Hugging Face repository](https://huggingface.co/facebook/OMAT24/blob/main/esen_30m_oam.pt) and place it in the examples folder before proceeding.
 
 ```bash
-python ../scripts/train.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
+python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
                 --material_id  UUID \
                 --target_property "Tc (K)(KKR-FULL)" \
                 --num_layers 10 --max_epochs 100 \
@@ -250,38 +256,23 @@ python ../scripts/train.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
                 --base_model "./esen_30m_oam.pt"
 ```
 
-For complete information on available parameters, run `python train.py -h`.
+<p align="center">
+  <img src="./examples_scripts/output/performance_Tc_(K)(KKR-FULL).png" alt="Formation energy performance" width="300">
+</p>
 
 
-## Usage: Detailed Step-by-Step Instructions
+## Step-by-Step Explanation of the script
 
-This section provides examples with explanations of the underlying processes. Each workflow includes Jupyter notebooks with step-by-step instructions for learning and customization.
+The `examples_notebook` contains Jupyter notebooks with step-by-step breakdowns and explanations of the scripts for each workflow introduced above. These notebooks are intended to help users customize script to make pipelines for their research needs.
 
-### 1. Dataset Preparation
+📁 1. `examples_notebook/1_prepare_dataset/` shows how to convert csv dataset into the FairChem-compatible format required for training.
 
-Learn how to convert your dataset into the FairChem-compatible format required for training.
+📁 2. `examples_notebook/2_train_scratch_formE/` shows how to train a formation energy model from scatch and applied to do predictions.
 
-📁 **Tutorial**: Detailed instructions available in `examples_notebook/1_prepare_dataset/`
+📁 3. `examples_notebook/3_train_TL_Tc/` shows the breakdown of Transfer Learning: Formation Energy → Critical Temperature
 
-### 2. Training from Scratch
+📁 4. `examples_notebook/4_train_TL_Tc_MLIP/` shows the breakdown of Transfer Learning: MLIP → Critical Temperature.  Please download the OMAT24 `eSEN-30M-OAM` MLIP model (`esen_30m_oam.pt`) from the [OMAT24 Hugging Face repository](https://huggingface.co/facebook/OMAT24/blob/main/esen_30m_oam.pt) and place it in the example folder.
 
-Build and train a formation energy model from the ground up using your prepared dataset.
-
-📁 **Tutorial**: Detailed instructions available in `examples_notebook/2_train_scratch_formE/`
-
-### 3. Transfer Learning: Formation Energy → Critical Temperature
-
-Train a critical temperature (Tc) model using a pre-trained formation energy model as the base.
-
-📁 **Tutorial**: Instructions available in `examples_notebook/3_train_TL_Tc/`
-
-### 4. Transfer Learning: MLIP → Critical Temperature
-
-Use pre-trained Machine Learning Interatomic Potentials (MLIPs) for critical temperature prediction.
-
-**Prerequisites**: Download the OMAT24 `eSEN-30M-OAM` MLIP model (`esen_30m_oam.pt`) from the [OMAT24 Hugging Face repository](https://huggingface.co/facebook/OMAT24/blob/main/esen_30m_oam.pt) and place it in the examples folder.
-
-📁 **Tutorial**: Instructions available in `examples_notebook/4_train_TL_Tc_MLIP/`
 
 ## Troubleshooting
 
@@ -353,8 +344,7 @@ If you use this code in your research, please cite our paper:
 }
 ```
 
-And please cite the FairChem paper specified at
-`https://pypi.org/project/fairchem-core/1.10.0/`:
+And please cite the FairChem paper specified at `https://pypi.org/project/fairchem-core/1.10.0/`:
 ```bibtex
 @article{ocp_dataset,
     author = {Chanussot*, Lowik and Das*, Abhishek and Goyal*, Siddharth and Lavril*, Thibaut and Shuaibi*, Muhammed and Riviere, Morgane and Tran, Kevin and Heras-Domingo, Javier and Ho, Caleb and Hu, Weihua and Palizhati, Aini and Sriram, Anuroop and Wood, Brandon and Yoon, Junwoong and Parikh, Devi and Zitnick, C. Lawrence and Ulissi, Zachary},
