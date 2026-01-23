@@ -10,11 +10,11 @@ Usage examples:
     # Basic training with default settings
     python train.py --target_property 2shot
     
-    # Transfer learning with specific FL layer
+    # Transfer learning with specific frozen layers
     python train.py \
         --target_property LDA \
         --transfer_learning \
-        --fl_layer 5 \
+        --frozen-layers 5 \
         --num_layers 12
     
     # Custom configuration and paths
@@ -43,7 +43,7 @@ Usage examples:
     python train.py \
         --target_property LDA \
         --transfer_learning \
-        --fl_layer 5 \
+        --frozen-layers 5 \
         --num_layers 12 \
         --dryrun
     # Generates: config_LDA_MPL12_TL5.yml
@@ -399,7 +399,7 @@ def calculate_normalization_stats(data_dir, target_property):
 
 def create_config_file(config_path, data_dir, target_property,
                        batch_size=8, max_epochs=100, learning_rate=0.0004,
-                       transfer_learning=False, fl_layer=7, num_layers=10,
+                       transfer_learning=False, frozen_layers=7, num_layers=10,
                        auto_normalize=True, cpu_only=False, num_gpus=1,
                        num_workers=4, pin_memory=False, manual_mean=None,
                        manual_stdev=None):
@@ -414,7 +414,7 @@ def create_config_file(config_path, data_dir, target_property,
         max_epochs (int): Maximum training epochs
         learning_rate (float): Learning rate
         transfer_learning (bool): Whether to use transfer learning
-        fl_layer (int): Fine-tuning layer for transfer learning
+        frozen_layers (int): Number of frozen layers for transfer learning
         num_layers (int): Number of layers in the model backbone
         auto_normalize (bool): Whether to auto-calculate normalization stats
         cpu_only (bool): Whether to use CPU-only mode
@@ -565,7 +565,7 @@ def create_config_file(config_path, data_dir, target_property,
     
     # Add transfer learning specific configuration
     if transfer_learning:
-        config['optim']['FL'] = fl_layer
+        config['optim']['FL'] = frozen_layers
     
     with open(config_path, 'w') as f:
         yaml.dump(config, f, default_flow_style=False, indent=2)
@@ -576,7 +576,7 @@ def create_config_file(config_path, data_dir, target_property,
     print(f"Distributed training: {num_gpus > 1}")
     print(f"Normalization - Mean: {mean:.6f}, Std Dev: {stdev:.6f}")
     if transfer_learning:
-        print(f"Transfer learning enabled with FL layer: {fl_layer}")
+        print(f"Transfer learning enabled with frozen layers: {frozen_layers}")
 
 
 def run_training(config_path, run_dir, job_name, base_model=None, gpu_id=0,
@@ -782,7 +782,7 @@ def plot_performance(df, target_property, output_prefix):
     plot_output = f"{output_prefix}_{target_property.replace(' ','_').replace('/','_')}.png"
     plt.savefig(plot_output, bbox_inches='tight')
     print(f"Performance plot saved to: {plot_output}")
-    plt.show()
+    # plt.show()
     
     # Print summary statistics
     print(f"\nPerformance Summary for {target_property}:")
@@ -1054,10 +1054,11 @@ def parse_args():
     )
     
     parser.add_argument(
-        '--fl_layer',
+        '--frozen-layers', '--fl_layer',
+        dest='frozen_layers',
         type=int,
         default=None,
-        help='Fine-tuning layer for transfer learning (default: 7)'
+        help='Number of frozen layers for transfer learning (formerly --fl_layer)'
     )
     
     parser.add_argument(
@@ -1146,10 +1147,10 @@ def main():
         if args.job_name is None:
             if not args.transfer_learning:
                 args.job_name = f"{target_property_string}_MPL{args.num_layers}"
-            elif args.fl_layer is None:
+            elif args.frozen_layers is None:
                 args.job_name = f"{target_property_string}_MPL{args.num_layers}_TL"
-            elif args.fl_layer is not None:
-                args.job_name = f"{target_property_string}_MPL{args.num_layers}_TLFL{args.fl_layer}"
+            elif args.frozen_layers is not None:
+                args.job_name = f"{target_property_string}_MPL{args.num_layers}_TLFL{args.frozen_layers}"
     
         # Validate inputs (skip for dryrun mode, except data_dir needed for normalization)
         if args.transfer_learning and not args.dryrun:
@@ -1179,7 +1180,7 @@ def main():
         print(f"  Number of Layers: {args.num_layers}")
         print(f"  Transfer Learning: {args.transfer_learning}")
         if args.transfer_learning:
-            print(f"  FL Layer: {args.fl_layer}")
+            print(f"  Frozen Layers: {args.frozen_layers}")
         print(f"  Base Model: {args.base_model}")
         print(f"  CPU Only: {args.cpu_only}")
         print(f"  Dry Run: {args.dryrun}")
@@ -1201,7 +1202,7 @@ def main():
         if args.transfer_learning:
             config_filename = (
                 f"config_{target_property_string}_MPL{args.num_layers}"
-                f"_TL{args.fl_layer}.yml"
+                f"_TL{args.frozen_layers}.yml"
             )
         else:
             config_filename = (
@@ -1218,7 +1219,7 @@ def main():
             max_epochs=args.max_epochs,
             learning_rate=args.learning_rate,
             transfer_learning=args.transfer_learning,
-            fl_layer=args.fl_layer,
+            frozen_layers=args.frozen_layers,
             num_layers=args.num_layers,
             auto_normalize=not args.disable_auto_normalize,
             cpu_only=args.cpu_only,
