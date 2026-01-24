@@ -129,7 +129,7 @@ The `--csv_file` flag specifies the input CSV file containing the training datas
 
 The target property and material ID column names are arbitrary and should match the values passed to the `--target_property` and `--material_id` flags respectively. Please refer to the example CSV files for the format requirements.
 
-This will generate a folder contians the train/val/text dataset for model training and evaluation in the next step. In this example, the folder name is `set_formation_energy_(eV_atom)_train`.  The output dir can be set using flag `--output_dir`.
+This will generate a folder contians the train/val/text dataset for model training and performance evaluation in the next step. In this example, the folder name is `set_formation_energy_(eV_atom)_train`.  The output dir can be set using flag `--output_dir`. The distribtuion plots are also included in this folder.
 
 For complete information on available parameters, run `python prepare_data.py -h`.
 
@@ -148,7 +148,40 @@ python ../scripts/MLIP_FTL.py --data_dir "set_formation_energy_(eV_atom)_train" 
 - `--num_layers`: Specifies the number of message-passing layers within the model
 - `--max_epochs`: Specifies the number of training epochs
 
-The training process outputs detailed information explaining each procedure step. Upon completion, the script provides the trained model checkpoint path and exports test results to a CSV file. Model performance is evaluated using the test set (data not seen during training) and visualized in a generated PNG figure: 
+The script outputs information explaining each step. The prgress of training (e.g. epoch number) is appended to `log` file specified by:
+```
+Logs are written to: log_train_formation_energy_(eV_atom)_MPL5.txt
+```
+
+Upon completion, the end part would be:
+``` 
+==================================================
+EVALUATION PHASE
+==================================================
+Performance Summary for formation energy (eV/atom):
+Metric              Value     
+------------------------------
+R² Score            0.9630
+MAE                 0.0520
+RMSE                0.0735
+Data Points         200
+
+==================================================
+TRAINING AND EVALUATION COMPLETED
+==================================================
+Training and evaluation completed successfully!
+Model checkpoint:
+    result_formation_energy_(eV_atom)/checkpoints/2026-01-24-14-30-40-formation_energy_(eV_atom)_MPL5/checkpoint.pt
+Prediction results of test set:
+    result_formation_energy_(eV_atom)/checkpoints/2026-01-24-14-30-40-formation_energy_(eV_atom)_MPL5/performance_formation_energy_(eV_atom).csv
+Performance plot:
+    result_formation_energy_(eV_atom)/checkpoints/2026-01-24-14-30-40-formation_energy_(eV_atom)_MPL5/performance_formation_energy_(eV_atom).png
+```
+
+Model performance is evaluated on the test set (data not seen during training).
+A CSV file containing test-set predictions and ground truth values is saved, along with a performance plot visualizing the model's performance. The trained model checkpoint can then be used to make predictions on new compounds.
+
+For this example, the performance plot is:
 
 <p align="center">
   <img src="./examples_scripts/output/performance_formation_energy_(eV_atom).png" alt="Formation energy performance" width="300">
@@ -195,7 +228,15 @@ python ../scripts/MLIP_FTL.py --apply \
 - `--model_path`: Specifies the path to the trained model checkpoint file
 - `--lmdb_path`: Specifies the path to the LMDB file containing compounds for prediction
 
-The script provides the path to output at the end. The output dir can be set using flag `--output_dir`.
+Upon completion, the script displays the output location. The output directory can be customized using the `--output_dir` flag.
+```
+==================================================
+PREDICTION COMPLETED
+==================================================
+The output is stored at:
+    "result_formation_energy_(eV_atom)_apply/results/2026-01-24-15-00-32-predict/predict_formation_energy_(eV_atom).csv"
+```
+
 
 ##### Tips
 
@@ -205,7 +246,7 @@ You can customize the output directory and job name using the `--output_dir` and
 
 **Selecting GPU Device**
 
-If multiple GPUs are available, you can specify which GPU to use with the `--gpu-id` flag. The script displays available GPU information at startup.
+If multiple GPUs are available, you can specify which GPU to use with the `--gpu-id` flag. Available GPUs are displayed at the beginning when the script starts.
 
 **Other Available Parameters**
 
@@ -231,15 +272,15 @@ python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
                 --target_property "Tc (K)(KKR-FULL)" \
                 --num_layers 5 --max_epochs 100 \
                 --transfer_learning \
-                --fl_layer 2 \
+                --frozen_layers 2 \
                 --base_model "result_formation_energy_(eV_atom)/checkpoints/2025-10-28-19-42-08-formation_energy_(eV_atom)_MPL5/checkpoint.pt"
 ```
-Without `--fl_layer` flag, All layers are updated in the training process.
+
 
 **Key Parameters:**
 - `--transfer_learning`: Enables transfer learning mode
 - `--base_model`: Specifies the path to the base model checkpoint file
-- `--fl_layer`: Specifies the number of frozen layers (layers that remain unchanged during training)
+- `--frozen_layers`: Specifies the number of frozen layers (layers that remain unchanged during training). Without `--fl_layer` flag, All layers are updated in the training process.
 
 
 #### 4. Transfer Learning: MLIP → Critical Temperature
@@ -252,7 +293,7 @@ python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
                 --target_property "Tc (K)(KKR-FULL)" \
                 --num_layers 10 --max_epochs 100 \
                 --transfer_learning \
-                --fl_layer 7 \
+                --frozen_layers  7 \
                 --base_model "./esen_30m_oam.pt"
 ```
 

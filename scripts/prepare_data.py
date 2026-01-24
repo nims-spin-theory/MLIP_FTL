@@ -530,7 +530,7 @@ def db_to_atomslist(compounds_df, material_id_col, properties,  dir_poscar=None,
     return atoms_list
 
 
-def analyze_dataset_statistics(lmdb_path, target_prop, binwidth=0.1):
+def analyze_dataset_statistics(lmdb_path, target_prop, output_dir=None, split_name=None, binwidth=0.1):
     """
     Analyze and visualize dataset statistics.
     
@@ -545,11 +545,15 @@ def analyze_dataset_statistics(lmdb_path, target_prop, binwidth=0.1):
         
         # Plot histogram
         plt.figure(figsize=(8, 6))
-        sns.histplot(values, binwidth=binwidth)
+        sns.histplot(values)
         plt.title(f"Distribution of {target_prop}")
         plt.xlabel(target_prop)
         plt.ylabel("Count")
-        plt.show()
+        if output_dir is not None and split_name is not None:
+            filename = f"{split_name}_distribution.png" 
+            plt.savefig(os.path.join(output_dir, filename), bbox_inches='tight')
+        plt.close()
+        # plt.show()
         
         # Print statistics
         print(f"{'Mean:':<10}{np.mean(values):.4f}")
@@ -753,7 +757,7 @@ def main():
         for split_name in split_set.keys():
             lmdb_path = f"{args.output_dir}/{split_name}.lmdb"
             print(f"\n{split_name.upper()} set statistics:")
-            analyze_dataset_statistics(lmdb_path, args.target_property)
+            analyze_dataset_statistics(lmdb_path, args.target_property, args.output_dir, split_name)
     
     print(f"\nDataset preparation complete! "
           f"Output saved to: {args.output_dir}")

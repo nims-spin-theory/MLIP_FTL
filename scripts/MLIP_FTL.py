@@ -14,7 +14,7 @@ Usage examples:
     python train.py \
         --target_property LDA \
         --transfer_learning \
-        --frozen-layers 5 \
+        --frozen_layers 5 \
         --num_layers 12
     
     # Custom configuration and paths
@@ -43,7 +43,7 @@ Usage examples:
     python train.py \
         --target_property LDA \
         --transfer_learning \
-        --frozen-layers 5 \
+        --frozen_layers 5 \
         --num_layers 12 \
         --dryrun
     # Generates: config_LDA_MPL12_TL5.yml
@@ -119,13 +119,13 @@ def print_gpu_optimization_summary(args):
     if args.gradient_accumulation_steps == 1 and args.batch_size < 32:
         print("  💡 Consider --gradient_accumulation_steps for larger effective batch size")
     
-    print("="*50)
+    print("\n")
 
 
 def print_gpu_info():
     """Print detailed GPU information for diagnostics."""
-    print("=" * 50)
-    print("GPU DIAGNOSTICS")
+    print("\n" + "=" * 50)
+    print("GPU INFORMATION")
     print("=" * 50)
     
     try:
@@ -157,8 +157,6 @@ def print_gpu_info():
         print(result.stdout)
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("nvidia-smi not available or failed")
-    
-    print("=" * 50)
 
 
 def optimize_batch_size(data_dir, max_batch_size=64, target_property="formation_energy"):
@@ -385,9 +383,9 @@ def calculate_normalization_stats(data_dir, target_property):
         print(f"Calculated normalization stats for {target_property}:")
         print(f"  Mean: {mean:.6f}")
         print(f"  Std Dev: {stdev:.6f}")
-        print(f"  Min: {np.min(values):.6f}")
-        print(f"  Max: {np.max(values):.6f}")
-        print(f"  Count: {len(values)}")
+        # print(f"  Min: {np.min(values):.6f}")
+        # print(f"  Max: {np.max(values):.6f}")
+        # print(f"  Count: {len(values)}")
         
         return mean, stdev
         
@@ -571,12 +569,12 @@ def create_config_file(config_path, data_dir, target_property,
         yaml.dump(config, f, default_flow_style=False, indent=2)
     
     print(f"Configuration saved to: {config_path}")
-    print(f"Model layers: {num_layers}")
-    print(f"GPUs: {0 if cpu_only else num_gpus}")
-    print(f"Distributed training: {num_gpus > 1}")
-    print(f"Normalization - Mean: {mean:.6f}, Std Dev: {stdev:.6f}")
-    if transfer_learning:
-        print(f"Transfer learning enabled with frozen layers: {frozen_layers}")
+    # print(f"Model layers: {num_layers}")
+    # print(f"GPUs: {0 if cpu_only else num_gpus}")
+    # print(f"Distributed training: {num_gpus > 1}")
+    # print(f"Normalization - Mean: {mean:.6f}, Std Dev: {stdev:.6f}")
+    # if transfer_learning:
+    #     print(f"Transfer learning enabled with frozen layers: {frozen_layers}")
 
 
 def run_training(config_path, run_dir, job_name, base_model=None, gpu_id=0,
@@ -642,15 +640,15 @@ def run_training(config_path, run_dir, job_name, base_model=None, gpu_id=0,
     env['WORLD_SIZE'] = str(num_gpus) if num_gpus > 1 else '1'
     env['LOCAL_RANK'] = '0'
     
-    print("Environment variables:")
-    print(f"  CUDA_VISIBLE_DEVICES: "
-          f"{env.get('CUDA_VISIBLE_DEVICES', 'not set')}")
-    print(f"  WORLD_SIZE: {env.get('WORLD_SIZE')}")
-    print(f"  Distributed training: {num_gpus > 1}")
+    # print("Environment variables:")
+    # print(f"  CUDA_VISIBLE_DEVICES: "
+    #       f"{env.get('CUDA_VISIBLE_DEVICES', 'not set')}")
+    # print(f"  WORLD_SIZE: {env.get('WORLD_SIZE')}")
+    # print(f"  Distributed training: {num_gpus > 1}")
     
     print(f"Starting training: {job_name}")
     print(f"Command: {' '.join(cmd)}")
-    print(f"Logs: {log_file}, {warn_file}")
+    print(f"Logs are written to: {log_file}, {warn_file}")
     
     # Execute training
     start_time = time.time()
@@ -688,7 +686,7 @@ def run_training(config_path, run_dir, job_name, base_model=None, gpu_id=0,
         config_dest = os.path.join(cpdir, 'config.yml')
         subprocess.run(['cp', config_path, config_dest], check=True)
         
-        print(f"Checkpoint directory: {cpdir}")
+        print(f"Checkpoint directory: {cpdir}/checkpoint.pt")
         return cpdir
         
     except Exception as e:
@@ -713,7 +711,7 @@ def evaluate_model(cpdir, test_data_path, target_property, material_id, output_p
     # Construct prediction file path
     prd_path = cpdir.replace('checkpoints', 'results') + '/ocp_predictions.npz'
     
-    print(f'Test set path: {test_data_path}')
+    print(f'Test set lmdb path: {test_data_path}')
     # print(f'Test set Prediction result path: {prd_path}')
     
     # Collect results
@@ -725,7 +723,7 @@ def evaluate_model(cpdir, test_data_path, target_property, material_id, output_p
     # Save results
     csv_output = f"{cpdir}/{output_prefix}_{target_property.replace(' ','_').replace('/','_')}.csv"
     df.to_csv(csv_output, index=False)
-    print(f"Test set results saved to: {csv_output}")
+    print(f"Prediction of test set is saved to: {csv_output}")
     
     return df
 
@@ -759,8 +757,8 @@ def plot_performance(df, target_property, output_prefix):
     plt.plot(lims, lims, 'r--', linewidth=2, label='Perfect Prediction (y = x)')
     
     # Labels and formatting
-    plt.xlabel(f"{target_property} (DFT)", fontsize=14)
-    plt.ylabel(f"{target_property} (ML)", fontsize=14)
+    plt.xlabel(f"{target_property} (True Value)", fontsize=14)
+    plt.ylabel(f"{target_property} (ML Prediction)", fontsize=14)
     plt.title(f"DFT vs ML {target_property} Prediction (Test Set)", fontsize=16)
     
     # Equal aspect ratio
@@ -781,7 +779,7 @@ def plot_performance(df, target_property, output_prefix):
     # Save plot
     plot_output = f"{output_prefix}_{target_property.replace(' ','_').replace('/','_')}.png"
     plt.savefig(plot_output, bbox_inches='tight')
-    print(f"Performance plot saved to: {plot_output}")
+    print(f"Performance plot evaluated using test set is saved to: {plot_output}")
     # plt.show()
     
     # Print summary statistics
@@ -872,15 +870,15 @@ def run_application(model_path, lmdb_path, run_dir, job_name, gpu_id=0,
     env['WORLD_SIZE'] = str(num_gpus) if num_gpus > 1 else '1'
     env['LOCAL_RANK'] = '0'
     
-    print("Environment variables:")
-    print(f"  CUDA_VISIBLE_DEVICES: "
-          f"{env.get('CUDA_VISIBLE_DEVICES', 'not set')}")
-    print(f"  WORLD_SIZE: {env.get('WORLD_SIZE')}")
-    print(f"  Distributed prediction process: {num_gpus > 1}")
+    # print("Environment variables:")
+    # print(f"  CUDA_VISIBLE_DEVICES: "
+    #       f"{env.get('CUDA_VISIBLE_DEVICES', 'not set')}")
+    # print(f"  WORLD_SIZE: {env.get('WORLD_SIZE')}")
+    # print(f"  Distributed prediction process: {num_gpus > 1}")
     
     print(f"Starting prediction: {target}")
     print(f"Command: {' '.join(cmd)}")
-    print(f"Logs: {log_file}, {warn_file}")
+    print(f"Logs are written to: {log_file}, {warn_file}")
     
     # Execute training
     start_time = time.time()
@@ -918,7 +916,8 @@ def run_application(model_path, lmdb_path, run_dir, job_name, gpu_id=0,
         config_dest = os.path.join(cpdir, 'config.yml')
         subprocess.run(['cp', config_path, config_dest], check=True)
         
-        print(f"The model used: {checkpoint_path}")
+        print(f"The model used: ")
+        print(f"    \"{checkpoint_path}\"")
         return cpdir
         
     except Exception as e:
@@ -1054,7 +1053,7 @@ def parse_args():
     )
     
     parser.add_argument(
-        '--frozen-layers', '--fl_layer',
+        '--frozen_layers', '--fl_layer',
         dest='frozen_layers',
         type=int,
         default=None,
@@ -1130,9 +1129,6 @@ def main():
     # Print GPU diagnostics
     print_gpu_info()
     
-    # Print GPU optimization summary
-    print_gpu_optimization_summary(args)
-
     if not args.apply:
         # replace \ and space by _
         target_property_string = args.target_property.replace(' ','_').replace('/','_')
@@ -1167,7 +1163,10 @@ def main():
                 print(f"Error: Data directory not found: {args.data_dir}")
                 return
         
-        print("Training Configuration:")
+        print("\n" + "="*50)
+        print("TRAINING CONFIGURATION")
+        print("="*50)
+        print("Parameters:")
         print(f"  Target Property: {args.target_property}")
         print(f"  Data Directory: {args.data_dir}")
         print(f"  Output Directory: {args.output_dir}")
@@ -1285,13 +1284,24 @@ def main():
         )
         
         # Generate performance plot
-        plot_performance(df, args.target_property, output_prefix)
+        plot_performance(df, args.target_property, os.path.join(cpdir, output_prefix))
         
+        print("\n" + "="*50)
+        print("TRAINING AND EVALUATION COMPLETED")
+        print("="*50)
         print("\nTraining and evaluation completed successfully!")
-        print(f"Results saved in: {args.output_dir}")
+        print(f"Model checkpoint:")
+        print(f"    \"{cpdir}/checkpoint.pt\"")
+        print("Prediction results of test set:")
+        print(f"    \"{cpdir}/performance_{args.target_property.replace(' ','_').replace('/','_')}.csv\"")
+        print("Performance plot:")
+        print(f"    \"{cpdir}/performance_{args.target_property.replace(' ','_').replace('/','_')}.png\"")
+        # print(f"Results saved in: {args.output_dir}")
 
     elif args.apply:
-        print("Using trained model to do prediction. \n")
+        print("\n" + "="*50)
+        print("PREDICTION PHASE")
+        print("="*50)
 
         # get target name 
         config_path     = args.model_path.replace('checkpoint.pt', '/config.yml')
@@ -1325,11 +1335,15 @@ def main():
                             target=target_property, material_id=args.material_id,
                             application=True)
         
+        print("\n" + "="*50)
+        print("PREDICTION COMPLETED")
+        print("="*50)
         # Save results
         csv_output = cpdir.replace('checkpoints','results')
         csv_output = csv_output + f'/predict_{target_property_string}.csv'
         df.to_csv(csv_output, index=False)
-        print(f"The output stored at: {csv_output}.")
+        print(f"The output is stored at:")
+        print(f"    \"{csv_output}\"")
         
 if __name__ == "__main__":
     main()
