@@ -2,11 +2,11 @@
 
 ## Overview
 
-This repository provides modifications and a user-friendly interface to FairChem v1 for **training machine-learning regression models (MLRM) for a property using the eSEN architecture, either from scratch or via transfer learning**. Getting started is straightforward. For training, provide a CSV file containing crystal structures and the target property. For prediction, provide a CSV file containing the crystal structures to evaluate.
+This repository provides modifications and a user-friendly interface to FairChem v1 for **training machine-learning regression model (MLRM) for a property using the eSEN architecture, either from scratch or via transfer learning**. Getting started is straightforward. For training, provide a CSV file containing crystal structures and the target property. For prediction, provide a CSV file containing the crystal structures to evaluate.
 
 A key feature is the implementation of frozen transfer learning (FTL). This approach reuses knowledge in pre-trained models, including universal machine-learning interatomic potential (uMLIP) eSEN-30M-OAM, to develop models for new properties, reducing the amount of training data required while maintaining strong performance. We refer to this repo as `MLIP-FTL`, and distinguish it from our companion package [MLIP-HOT](https://github.com/nims-spin-theory/MLIP_HOT), which directly employs uMLIPs for structure optimization, formation energy, and convex-hull distance calculations.
 
-This implementation and its applications are detailed in our research paper: [arXiv:2508.20556](https://arxiv.org/abs/2508.20556). If MLIP‑FTL supports your work, please cite this paper; a BibTeX entry is provided in the Citation section below.
+This implementation and its applications are detailed in our research paper: [arXiv:2508.20556](https://arxiv.org/abs/2508.20556). If you use this code or derive work from it, please cite this paper and FairChem package.
 
 
 ##### Key Features
@@ -87,7 +87,7 @@ pip install ase_db_backends
 
 ## Usage
 
-This section shows three common workflows using our interface scripts in the `scripts` folder. These examples provide hands-on experience and can be adapted for your research needs.
+This section shows three common workflows using our interface scripts in the `scripts` folder. These examples provide hands-on experience and can be adapted for your research needs. The example data is obtained from the [DXMag Computational HeuslerDB](https://www.nims.go.jp/group/spintheory/database/).
 
 **Workflows Overview:**
 
@@ -375,7 +375,7 @@ When using frozen transfer learning, you may encounter the following error:
 
 ## Citation
 
-If you use this code or derive work from it in your, please cite our paper:
+If you use this code or derive work from it in your research, please cite our paper:
 
 ```bibtex
 @misc{xiao2026accuratescreeningfunctionalmaterials,
