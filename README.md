@@ -6,7 +6,7 @@ This repository provides modifications and a user-friendly interface to FairChem
 
 A key feature is the implementation of frozen transfer learning (FTL). This approach reuses knowledge in pre-trained models, including universal machine-learning interatomic potential (uMLIP) eSEN-30M-OAM, to develop models for new properties, reducing the amount of training data required while maintaining strong performance. We refer to this repo as `MLIP-FTL`, and distinguish it from our companion package [MLIP-HOT](https://github.com/nims-spin-theory/MLIP_HOT), which directly employs uMLIPs for structure optimization, formation energy, and convex-hull distance calculations.
 
-This implementation and its applications are detailed in our research paper: [arXiv:2508.20556](https://arxiv.org/abs/2508.20556). If you use this code or derive work from it, please cite this paper and FairChem package.
+This implementation and its applications are detailed in our research paper: [arXiv:2508.20556](https://arxiv.org/abs/2508.20556). If you use this code or derive work from it, please cite this paper and FairChem package. Please open an issue if you encounter any bugs.
 
 
 ##### Key Features
@@ -15,6 +15,7 @@ This implementation and its applications are detailed in our research paper: [ar
 - **Frozen Transfer Learning**: Transfer knowledge from pre-trained models while keeping the first several layers frozen, preserving learned representations.
 - **uMLIP FTL**: Using the universal machine-learning interatomic potential (uMLIP) eSEN-30M-OAM as a base model for enhanced performance.
 - **Forked from FairChem v1**: This repository is a modified fork of FairChem v1, based on commit `d4dd224a0c2fdfab6bab550f6cc6463a9c29d48d`.
+
 
 
 ## Installation
@@ -62,7 +63,7 @@ pip install torch-scatter torch-sparse torch-spline-conv -f https://data.pyg.org
 pip install torch-cluster torch_geometric -f https://data.pyg.org/whl/torch-2.4.1+cu124.html
 
 # Install additional dependencies
-pip install ase_db_backends
+pip install ase_db_backends seaborn scikit-learn
 ```
 
 ### CPU-Only Installation
@@ -244,7 +245,7 @@ You can customize the output directory and job name using the `--output_dir` and
 
 **Selecting GPU Device**
 
-If multiple GPUs are available, you can specify which GPU to use with the `--gpu-id` flag. Available GPUs are displayed when script is used.
+If multiple GPUs are available, you can specify which GPU to use with the `--gpu_id` flag. Available GPUs are displayed when script is used.
 
 **Other Available Parameters**
 
@@ -277,6 +278,7 @@ python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
                 --base_model "result_formation_energy_(eV_atom)/checkpoints/2025-10-28-19-42-08-formation_energy_(eV_atom)_MPL5/checkpoint.pt"
 ```
 
+> **Tip**: If training fails, check the Troubleshooting section below for common errors and solutions.
 
 **Key Parameters:**
 - `--transfer_learning`: Enables transfer learning mode
