@@ -2,11 +2,11 @@
 
 ## Overview
 
-This repository provides modifications and a user-friendly interface to FairChem v1 for **training machine-learning regression model (MLRM) for a property using the eSEN architecture, either from scratch or via transfer learning**. Getting started is straightforward. For training, provide a CSV file containing crystal structures and the target property. For prediction, provide a CSV file containing the crystal structures to evaluate.
+This repository provides modifications and a user-friendly interface to FairChem v1 for **training machine-learning regression model (MLRM) of a property using the eSEN architecture, either from scratch or via transfer learning**. Getting started is straightforward. For training, provide a CSV file containing crystal structures and the target property. For prediction, provide a CSV file containing the crystal structures to evaluate.
 
-A key feature is the implementation of frozen transfer learning (FTL). This approach reuses knowledge in pre-trained models, including universal machine-learning interatomic potential (uMLIP) eSEN-30M-OAM, to develop models for new properties, reducing the amount of training data required while maintaining strong performance. We refer to this repo as `MLIP-FTL`, and distinguish it from our companion package [MLIP-HOT](https://github.com/nims-spin-theory/MLIP_HOT), which directly employs uMLIPs for structure optimization, formation energy, and convex-hull distance calculations.
+A key feature is the implementation of frozen transfer learning (FTL). This approach reuses knowledge in pre-trained models, including universal machine-learning interatomic potential (uMLIP) eSEN-30M-OAM, to develop models for new property, reducing the amount of training data required while maintaining strong performance. We refer to this repo as `MLIP-FTL`, and distinguish it from our companion package [MLIP-HOT](https://github.com/nims-spin-theory/MLIP_HOT), which directly employs uMLIPs for structure optimization, formation energy, and convex-hull distance calculations.
 
-This implementation and its applications are detailed in our research paper: [arXiv:2508.20556](https://arxiv.org/abs/2508.20556). If you use this code or derive work from it, please cite this paper and FairChem package. Please open an issue if you encounter any bugs.
+This implementation and its applications are detailed in our research paper: [npj Computational Materials (2026) XX:XX](https://www.nature.com/articles/s41524-026-02013-0). If you use this code or derive work from it, please cite this paper and FairChem package. Please open an issue if you encounter any bugs.
 
 
 ##### Key Features
@@ -53,12 +53,14 @@ conda activate MLIP_FTL
 module load cuda/12.4  # Only needed if CUDA is managed by environment modules
 
 # Install PyTorch with CUDA support
+# cu124 at the end due to CUDA 12.4 version
 pip install torch==2.4.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 # Install FairChem in development mode
 pip install -e packages/fairchem-core[dev]
 
 # Install additional PyTorch dependencies
+# cu124 at the end due to CUDA 12.4 version
 pip install torch-scatter torch-sparse torch-spline-conv -f https://data.pyg.org/whl/torch-2.4.1+cu124.html
 pip install torch-cluster torch_geometric -f https://data.pyg.org/whl/torch-2.4.1+cu124.html
 
@@ -93,7 +95,7 @@ This section shows three common workflows using our interface scripts in the `sc
 **Workflows Overview:**
 
 1. **Train from scratch**: Build a formation energy model from scratch and use it for predictions
-2. **Transfer learning (Model → Model)**: Train a critical temperature model using the formation energy model as base
+2. **Transfer learning (Model → Model)**: Train a magnetic critical  (Curie or Néel) temperature model using the formation energy model as base
 3. **Transfer learning (eSEN-30M-OAM uMLIP → Model)**: Train a critical temperature model using the pre-trained eSEN-30M-OAM uMLIP as base
 
 First, navigate to the examples folder containing example input CSV files:
@@ -288,7 +290,7 @@ python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
 
 #### 4. Transfer Learning: MLIP → Critical Temperature
 
-**Prerequisites**: This example requires the OMAT24 `eSEN-30M-OAM` MLIP model. Please download `esen_30m_oam.pt` from the [OMAT24 Hugging Face repository](https://huggingface.co/facebook/OMAT24/blob/main/esen_30m_oam.pt) and place it in the examples folder before proceeding.
+**Prerequisites**: This example requires the OMAT24 `eSEN-30M-OAM` MLIP model. Please download `esen_30m_oam.pt` from the [OMAT24 Hugging Face repository](https://huggingface.co/facebook/OMAT24) and place it in the examples folder before proceeding. 
 
 ```bash
 python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
@@ -350,9 +352,9 @@ When using frozen transfer learning, you may encounter the following error:
    ~/miniconda3/envs/MLIP_FTL/lib/python3.9/site-packages/torch/nn/parallel/distributed.py
    ```
 
-2. **Edit the DistributedDataParallel class** (around line 637):
+2. **Edit the DistributedDataParallel class in distributed.py file** (around line 637):
 
-   Change `find_unused_parameters=False` to `find_unused_parameters=True`:
+   Change `find_unused_parameters=False` to `find_unused_parameters=True` like this:
 
    ```python
    def __init__(
@@ -374,20 +376,20 @@ When using frozen transfer learning, you may encounter the following error:
        device_mesh=None,
    ):
    ```
+  This should fix the problem. Please try training again. 
 
 ## Citation
 
 If you use this code or derive work from it in your research, please cite our paper:
-
+[Need to update this after formal release]
 ```bibtex
-@misc{xiao2026accuratescreeningfunctionalmaterials,
-      title={Accurate Screening of Functional Materials with Machine-Learning Potential and Transfer-Learned Regressions: Heusler Alloy Benchmark}, 
-      author={Enda Xiao and Terumasa Tadano},
-      year={2026},
-      eprint={2508.20556},
-      archivePrefix={arXiv},
-      primaryClass={cond-mat.mtrl-sci},
-      url={https://arxiv.org/abs/2508.20556}, 
+@article{npjcm_2026accuratescreeningfunctionalmaterials,
+	date = {2026/02/19},
+	doi = {10.1038/s41524-026-02013-0},
+	journal = {npj Computational Materials},
+	title = {Accurate screening of functional materials with machine-learning potential and transfer-learned regressions: Heusler alloy benchmark},
+	url = {https://doi.org/10.1038/s41524-026-02013-0},
+	year = {2026},
 }
 ```
 
@@ -418,7 +420,7 @@ and eSEN model paper:
 
 ## Acknowledgments
 
-- Built on top of the [FairChem](https://github.com/FAIR-Chem/fairchem) framework v1.10.0. Thanks to the FairChem team for providing this powerful framework.
+- This is built on [FairChem](https://github.com/FAIR-Chem/fairchem) framework v1.10.0. Thanks a lot to the FairChem team for providing this powerful framework.
 
 
 
