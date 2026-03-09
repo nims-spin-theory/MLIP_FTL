@@ -11,7 +11,7 @@ This implementation and its applications are detailed in our research paper: [np
 
 ##### Key Features
 
-- **Training and Inference Interface**: A CLI to prepare train/val/test datasets, train regression models, evaluate performance, and run inference (prediction) from CSV inputs.
+- **Training and Inference Interface**: A command line interface (CLI) to prepare train/val/test datasets, train regression models, evaluate performance, and run inference (prediction) from CSV inputs.
 - **Frozen Transfer Learning**: Transfer knowledge from pre-trained models while keeping the first several layers frozen, preserving learned representations.
 - **uMLIP FTL**: Using the universal machine-learning interatomic potential (uMLIP) eSEN-30M-OAM as a base model for enhanced performance.
 - **Forked from FairChem v1**: This repository is a modified fork of FairChem v1, based on commit `d4dd224a0c2fdfab6bab550f6cc6463a9c29d48d`.
