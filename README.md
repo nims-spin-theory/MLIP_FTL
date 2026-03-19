@@ -147,6 +147,7 @@ python ../scripts/MLIP_FTL.py --data_dir "set_formation_energy_(eV_atom)_train" 
 - `--data_dir`: Specifies the data directory created by `prepare_data.py`
 - `--num_layers`: Specifies the number of message-passing layers within the model
 - `--max_epochs`: Specifies the number of training epochs
+- `--head_reduce`: Controls atom pooling in the energy head (`mean` by default, or `sum`)
 
 The script prints information about the training procedure. The progress (e.g., epoch number) is appended to the log file:
 ```
@@ -276,6 +277,7 @@ python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
                 --target_property "Tc (K)(KKR-FULL)" \
                 --num_layers 5 --max_epochs 100 \
                 --transfer_learning \
+                --tl_mode full \
                 --frozen_layers 2 \
                 --base_model "result_formation_energy_(eV_atom)/checkpoints/2025-10-28-19-42-08-formation_energy_(eV_atom)_MPL5/checkpoint.pt"
 ```
@@ -285,7 +287,28 @@ python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
 **Key Parameters:**
 - `--transfer_learning`: Enables transfer learning mode
 - `--base_model`: Specifies the path to the base model checkpoint file
-- `--frozen_layers`: Specifies the number of frozen layers (layers that remain unchanged during training). Without the `--frozen_layers` flag, all layers are updated during training.
+- `--tl_mode`: Transfer learning mode. `full` (default) loads all compatible weights. `partial` loads only early  layers.
+- `--transfer_layers`: Number of early layers to transfer when `--tl_mode partial` is used.
+- `--frozen_layers`: Number of frozen layers (layers that remain unchanged during training).
+
+**Transfer learning modes**
+
+- `--tl_mode full` (default): previous behavior. `--transfer_layers` is not required.
+- `--tl_mode partial`: requires both `--transfer_layers` and `--frozen_layers`, and `frozen_layers <= transfer_layers`.
+
+Example for partial transfer learning:
+
+```bash
+python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
+                --material_id  UUID \
+                --target_property "Tc (K)(KKR-FULL)" \
+                --num_layers 5 --max_epochs 100 \
+                --transfer_learning \
+                --tl_mode partial \
+                --transfer_layers 3 \
+                --frozen_layers 2 \
+                --base_model "result_formation_energy_(eV_atom)/checkpoints/2025-10-28-19-42-08-formation_energy_(eV_atom)_MPL5/checkpoint.pt"
+```
 
 
 #### 4. Transfer Learning: MLIP → Critical Temperature
@@ -298,7 +321,9 @@ python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
                 --target_property "Tc (K)(KKR-FULL)" \
                 --num_layers 10 --max_epochs 100 \
                 --transfer_learning \
-                --frozen_layers  7 \
+                --tl_mode partial \
+                --transfer_layers 10 \
+                --frozen_layers    7 \
                 --base_model "./esen_30m_oam.pt"
 ```
 

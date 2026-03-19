@@ -398,9 +398,10 @@ def calculate_normalization_stats(data_dir, target_property):
 def create_config_file(config_path, data_dir, target_property,
                        batch_size=8, max_epochs=100, learning_rate=0.0004,
                        transfer_learning=False, frozen_layers=7, num_layers=10,
+                       tl_mode='full', transfer_layers=None,
                        auto_normalize=True, cpu_only=False, num_gpus=1,
                        num_workers=4, pin_memory=False, manual_mean=None,
-                       manual_stdev=None):
+                       manual_stdev=None, head_reduce='sum'):
     """
     Create comprehensive YAML configuration file for training.
     
@@ -414,6 +415,8 @@ def create_config_file(config_path, data_dir, target_property,
         transfer_learning (bool): Whether to use transfer learning
         frozen_layers (int): Number of frozen layers for transfer learning
         num_layers (int): Number of layers in the model backbone
+        tl_mode (str): Transfer learning mode ('full' or 'partial')
+        transfer_layers (int): Number of early backbone blocks to transfer in partial mode
         auto_normalize (bool): Whether to auto-calculate normalization stats
         cpu_only (bool): Whether to use CPU-only mode
         num_gpus (int): Number of GPUs to use
@@ -421,6 +424,7 @@ def create_config_file(config_path, data_dir, target_property,
         pin_memory (bool): Whether to use pinned memory
         manual_mean (float): Manually specified mean (overrides auto-calculation)
         manual_stdev (float): Manually specified stdev (overrides auto-calculation)
+        head_reduce (str): Pooling reduction for energy heads ('sum' or 'mean')
     """
     # Determine normalization statistics
     if manual_mean is not None and manual_stdev is not None:
@@ -522,7 +526,8 @@ def create_config_file(config_path, data_dir, target_property,
             },
             'heads': {
                 'energy': {
-                    'module': 'esen_mlp_energy_head'
+                    'module': 'esen_mlp_energy_head',
+                    'reduce': head_reduce
                 }
             },
             'name': 'hydra',
@@ -563,8 +568,12 @@ def create_config_file(config_path, data_dir, target_property,
     
     # Add transfer learning specific configuration
     if transfer_learning:
-        config['optim']['FL'] = frozen_layers
-    
+        config['optim']['TL_mode'] = tl_mode
+        if tl_mode == 'partial':
+            config['optim']['TL_transfer_layers'] = transfer_layers
+        if frozen_layers is not None:
+            config['optim']['FL'] = frozen_layers
+            
     with open(config_path, 'w') as f:
         yaml.dump(config, f, default_flow_style=False, indent=2)
     
@@ -952,6 +961,13 @@ def parse_args():
     )
     
     parser.add_argument(
+        '--num_layers',
+        type=int,
+        default=10,
+        help='Number of layers in the model backbone (default: 10)'
+    )
+
+    parser.add_argument(
         '--base_model',
         type=str,
         default=None,
@@ -1051,6 +1067,21 @@ def parse_args():
         action='store_true',
         help='Enable transfer learning mode'
     )
+
+    parser.add_argument(
+        '--tl_mode',
+        type=str,
+        choices=['full', 'partial'],
+        default='full',
+        help='Transfer learning mode: full=load all compatible weights, partial=load only early layers'
+    )
+
+    parser.add_argument(
+        '--transfer_layers',
+        type=int,
+        default=None,
+        help='Number of early backbone blocks to transfer when --tl_mode partial is used'
+    )
     
     parser.add_argument(
         '--frozen_layers', '--fl_layer',
@@ -1059,12 +1090,13 @@ def parse_args():
         default=None,
         help='Number of frozen layers for transfer learning (formerly --fl_layer)'
     )
-    
+
     parser.add_argument(
-        '--num_layers',
-        type=int,
-        default=10,
-        help='Number of layers in the model backbone (default: 10)'
+        '--head_reduce',
+        type=str,
+        choices=['sum', 'mean'],
+        default='mean',
+        help='Atom pooling reduction for energy heads: mean (default) or sum'
     )
     
     parser.add_argument(
@@ -1118,7 +1150,9 @@ def parse_args():
         default=None,
         help='lmdb_path to the compounds for predction application.'
     )
-    
+
+
+
     return parser.parse_args()
 
 
@@ -1143,15 +1177,42 @@ def main():
         if args.job_name is None:
             if not args.transfer_learning:
                 args.job_name = f"{target_property_string}_MPL{args.num_layers}"
+            elif args.tl_mode == 'partial':
+                if args.transfer_layers is not None and args.frozen_layers is not None:
+                    args.job_name = (
+                        f"{target_property_string}_MPL{args.num_layers}"
+                        f"_TL{args.transfer_layers}_FL{args.frozen_layers}"
+                    )
+                elif args.transfer_layers is not None:
+                    args.job_name = (
+                        f"{target_property_string}_MPL{args.num_layers}"
+                        f"_TL{args.transfer_layers}"
+                    )
+                else:
+                    args.job_name = f"{target_property_string}_MPL{args.num_layers}_TL"
             elif args.frozen_layers is None:
                 args.job_name = f"{target_property_string}_MPL{args.num_layers}_TL"
-            elif args.frozen_layers is not None:
-                args.job_name = f"{target_property_string}_MPL{args.num_layers}_TLFL{args.frozen_layers}"
+            else:
+                args.job_name = f"{target_property_string}_MPL{args.num_layers}_TL_FL{args.frozen_layers}"
     
         # Validate inputs (skip for dryrun mode, except data_dir needed for normalization)
         if args.transfer_learning and not args.dryrun:
             if not os.path.exists(args.base_model):
                 print(f"Error: Base model not found: {args.base_model}")
+                return
+
+        if args.transfer_learning and args.tl_mode == 'partial':
+            if args.transfer_layers is None or args.transfer_layers <= 0:
+                print("Error: --transfer_layers must be a positive integer when --tl_mode partial is used")
+                return
+            if args.frozen_layers is not None and args.frozen_layers < 0:
+                print("Error: --frozen_layers must be >= 0")
+                return
+            if args.frozen_layers is not None and args.frozen_layers > args.transfer_layers:
+                print(
+                    "Error: --frozen_layers must be less than or equal to --transfer_layers "
+                    f"(got frozen_layers={args.frozen_layers}, transfer_layers={args.transfer_layers})"
+                )
                 return
         
         # Data directory is always needed (for normalization calculation)
@@ -1179,6 +1240,9 @@ def main():
         print(f"  Number of Layers: {args.num_layers}")
         print(f"  Transfer Learning: {args.transfer_learning}")
         if args.transfer_learning:
+            print(f"  TL Mode: {args.tl_mode}")
+            if args.tl_mode == 'partial':
+                print(f"  Transfer Layers: {args.transfer_layers}")
             print(f"  Frozen Layers: {args.frozen_layers}")
         print(f"  Base Model: {args.base_model}")
         print(f"  CPU Only: {args.cpu_only}")
@@ -1199,10 +1263,30 @@ def main():
         
         # Generate configuration file (always done, even for dryrun)
         if args.transfer_learning:
-            config_filename = (
-                f"config_{target_property_string}_MPL{args.num_layers}"
-                f"_TL{args.frozen_layers}.yml"
-            )
+            if args.tl_mode == 'partial':
+                if args.transfer_layers is not None and args.frozen_layers is not None:
+                    config_filename = (
+                        f"config_{target_property_string}_MPL{args.num_layers}"
+                        f"_TL{args.transfer_layers}_FL{args.frozen_layers}.yml"
+                    )
+                elif args.transfer_layers is not None:
+                    config_filename = (
+                        f"config_{target_property_string}_MPL{args.num_layers}"
+                        f"_TL{args.transfer_layers}.yml"
+                    )
+                else:
+                    config_filename = (
+                        f"config_{target_property_string}_MPL{args.num_layers}_TL.yml"
+                    )
+            elif args.frozen_layers is None:
+                config_filename = (
+                    f"config_{target_property_string}_MPL{args.num_layers}_TL.yml"
+                )
+            else:
+                config_filename = (
+                    f"config_{target_property_string}_MPL{args.num_layers}"
+                    f"_TL_FL{args.frozen_layers}.yml"
+                )
         else:
             config_filename = (
                 f"config_{target_property_string}_MPL{args.num_layers}.yml"
@@ -1220,13 +1304,16 @@ def main():
             transfer_learning=args.transfer_learning,
             frozen_layers=args.frozen_layers,
             num_layers=args.num_layers,
+            tl_mode=args.tl_mode,
+            transfer_layers=args.transfer_layers,
             auto_normalize=not args.disable_auto_normalize,
             cpu_only=args.cpu_only,
             num_gpus=args.num_gpus,
             num_workers=args.num_workers,
             pin_memory=args.pin_memory,
             manual_mean=args.manual_mean,
-            manual_stdev=args.manual_stdev
+            manual_stdev=args.manual_stdev,
+            head_reduce=args.head_reduce
         )
         
         # Exit early if dryrun mode
