@@ -8,13 +8,19 @@ A key feature is the implementation of frozen transfer learning (FTL). This appr
 
 This implementation and its applications are detailed in our research paper: [npj Computational Materials (2026) XX:XX](https://www.nature.com/articles/s41524-026-02013-0). If you use this code or derive work from it, please cite this paper and FairChem package. Please open an issue if you encounter any bugs.
 
-
-##### Key Features
+### Key Features
 
 - **Training and Inference Interface**: A command line interface (CLI) to prepare train/val/test datasets, train regression models, evaluate performance, and run inference (prediction) from CSV inputs.
 - **Frozen Transfer Learning**: Transfer knowledge from pre-trained models while keeping the first several layers frozen, preserving learned representations.
 - **uMLIP FTL**: Using the universal machine-learning interatomic potential (uMLIP) eSEN-30M-OAM as a base model for enhanced performance.
 - **Forked from FairChem v1**: This repository is a modified fork of FairChem v1, based on commit `d4dd224a0c2fdfab6bab550f6cc6463a9c29d48d`.
+
+> ### 🚧 Development Update
+> The current version is already good to use. We are also actively adding new features to make it even better, so please check back soon.
+>
+> Coming up next:
+> 1. A benchmark for this approach.
+> 2. More details on training flags and hands-on training tips.
 
 
 
@@ -330,19 +336,6 @@ python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
 <p align="center">
     <img src="./examples_scripts/output/performance_Tc_(K)(KKR-FULL).png" alt="Critical temperature performance" width="300">
 </p>
-
-
-## Step-by-Step Explanation of the scripts
-
-The `examples_notebook` contains Jupyter notebooks with step-by-step breakdowns and explanations of the scripts for each workflow introduced above. These notebooks are intended to help users customize the scripts to build pipelines for their research needs.
-
-📁 1. `examples_notebook/1_prepare_dataset/` shows how to convert csv dataset into the FairChem-compatible format required for training.
-
-📁 2. `examples_notebook/2_train_scratch_formE/` shows how to train a formation energy model from scratch and apply it to make predictions.
-
-📁 3. `examples_notebook/3_train_TL_Tc/` shows the breakdown of Transfer Learning: Formation Energy → Critical Temperature
-
-📁 4. `examples_notebook/4_train_TL_Tc_MLIP/` shows the breakdown of Transfer Learning: MLIP → Critical Temperature. Please download the OMAT24 `eSEN-30M-OAM` MLIP model (`esen_30m_oam.pt`) from the [OMAT24 Hugging Face repository](https://huggingface.co/facebook/OMAT24/blob/main/esen_30m_oam.pt) and place it in the examples folder.
 
 
 ## Troubleshooting
