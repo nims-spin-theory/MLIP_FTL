@@ -449,6 +449,13 @@ def create_config_file(config_path, data_dir, target_property,
         mean, stdev = 350, 350
         print("Using default normalization values: mean=350, stdev=350")
     
+    val_path = f'{data_dir}/val.lmdb'
+    test_path = f'{data_dir}/test.lmdb'
+    if not os.path.exists(val_path) and os.path.exists(test_path):
+        # Holdout mode from prepare_data.py creates only train/test.
+        # Reuse test split for validation so FairChem can still run validation.
+        val_path = test_path
+
     # Base configuration following the provided YAML structure
     config = {
         'dataset': {
@@ -469,14 +476,14 @@ def create_config_file(config_path, data_dir, target_property,
             },
             'val': {
                 'format': 'lmdb',
-                'src': f'{data_dir}/val.lmdb',
+                'src': val_path,
                 'key_mapping': {
                     target_property: 'energy'
                 }
             },
             'test': {
                 'format': 'lmdb',
-                'src': f'{data_dir}/test.lmdb',
+                'src': test_path,
                 'key_mapping': {
                     target_property: 'energy'
                 }
@@ -1223,6 +1230,28 @@ def main():
             else:
                 print(f"Error: Data directory not found: {args.data_dir}")
                 return
+
+        train_lmdb_path = os.path.join(args.data_dir, "train.lmdb")
+        val_lmdb_path = os.path.join(args.data_dir, "val.lmdb")
+        test_lmdb_path = os.path.join(args.data_dir, "test.lmdb")
+        is_holdout_style = (not os.path.exists(val_lmdb_path) and os.path.exists(test_lmdb_path))
+
+        if not args.dryrun:
+            if not os.path.exists(train_lmdb_path):
+                print(f"Error: Training data not found: {train_lmdb_path}")
+                return
+            if not os.path.exists(test_lmdb_path):
+                print(f"Error: Test data not found: {test_lmdb_path}")
+                return
+
+            if is_holdout_style:
+                print("\n" + "="*50)
+                print("HOLDOUT MODE DETECTED")
+                print("="*50)
+                print(
+                    "No val.lmdb found. This run uses holdout-style training: "
+                    "test.lmdb is reused as val.lmdb in the generated config."
+                )
         
         print("\n" + "="*50)
         print("TRAINING CONFIGURATION")
@@ -1247,6 +1276,8 @@ def main():
         print(f"  Base Model: {args.base_model}")
         print(f"  CPU Only: {args.cpu_only}")
         print(f"  Dry Run: {args.dryrun}")
+        if is_holdout_style:
+            print("  Split Style: holdout (val uses test.lmdb)")
         
         # Optimize batch size if requested
         if args.auto_batch_size and not args.cpu_only:
@@ -1378,10 +1409,18 @@ def main():
         print("="*50)
         print("\nTraining and evaluation completed successfully!")
         print(f"Model checkpoint:")
-        print(f"    \"{cpdir}/checkpoint.pt\"")
-        print("Prediction results of test set:")
+        if is_holdout_style:  
+            print("Final model at the end of training:")
+            print(f"    \"{cpdir}/checkpoint.pt\"")
+            print("No separate validation set (holdout-style training), so no checkpoint selected based on validation set.")
+        else:
+            print("Final model at the end of training:")
+            print(f"    \"{cpdir}/checkpoint.pt\"")
+            print("Best model based on validation set:")
+            print(f"    \"{cpdir}/best_checkpoint.pt\"")
+        print("Prediction results of test set (final model used):")
         print(f"    \"{cpdir}/performance_{args.target_property.replace(' ','_').replace('/','_')}.csv\"")
-        print("Performance plot:")
+        print("Performance plot (final model used):")
         print(f"    \"{cpdir}/performance_{args.target_property.replace(' ','_').replace('/','_')}.png\"")
         # print(f"Results saved in: {args.output_dir}")
 
