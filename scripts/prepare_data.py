@@ -13,6 +13,10 @@ Usage examples:
 
     # data paths for prediction application
     python prepare_data.py --csv_file my_data.csv --apply
+
+    # train/val from one csv and fixed test from another csv
+    python prepare_data.py --csv_file train_val.csv --test_csv_file test.csv \
+                           --target_property Formation_Energy --split_style three_way
     
     # Limit dataset size for testing or quick processing by -max_samples flag.
     python prepare_data.py ... --max_samples 1000 
@@ -115,42 +119,62 @@ def get_structure(system):
     return structure
 
 
-def split_dataset(atoms_list, ratio=[0.8, 0.1, 0.1], seed=None):
+def split_dataset(atoms_list, ratio=[0.8, 0.1, 0.1], seed=None, split_style='three_way'):
     """
-    Split dataset into train/validation/test sets by given ratio.
+    Split dataset into train/validation/test or train/test sets by given ratio.
     
     Args:
         atoms_list (list): List of ASE atoms objects
-        ratio (list): Split ratios for [train, val, test]
+        ratio (list): Split ratios for [train, val, test] (three_way)
+                  or [train, test] (holdout)
         seed (int): Random seed for reproducibility
+        split_style (str): Split strategy ('three_way' or 'holdout')
         
     Returns:
-        dict: Dictionary with 'train', 'val', 'test' keys containing split data
+        dict: Dictionary with split keys based on split_style
     """
     N = len(atoms_list)
     ratio = np.array(ratio)
-    assert ratio.sum() == 1.0, "Ratios must sum to 1.0"
+    assert np.isclose(ratio.sum(), 1.0), "Ratios must sum to 1.0"
     ratio /= ratio.sum()    
 
+    if split_style not in ['three_way', 'holdout']:
+        raise ValueError(f"Unknown split_style: {split_style}")
+    if split_style == 'three_way' and len(ratio) != 3:
+        raise ValueError("three_way split requires 3 ratios: train val test")
+    if split_style == 'holdout' and len(ratio) != 2:
+        raise ValueError("holdout split requires 2 ratios: train test")
+
     train_end = int(N * ratio[0])
-    val_end = train_end + int(N * ratio[1])
+    if split_style == 'three_way':
+        val_end = train_end + int(N * ratio[1])
     
     ids = np.arange(N)
     rng = np.random.default_rng(seed=seed)
     rng.shuffle(ids)
     
-    split_set = {
-        'train': [],
-        'val': [],
-        'test': []
-    }
+    if split_style == 'three_way':
+        split_set = {
+            'train': [],
+            'val': [],
+            'test': []
+        }
+    else:
+        split_set = {
+            'train': [],
+            'test': []
+        }
     
     for ind in ids[0:train_end]:
         split_set['train'].append(atoms_list[ind])
-    for ind in ids[train_end:val_end]:
-        split_set['val'].append(atoms_list[ind])
-    for ind in ids[val_end:]:
-        split_set['test'].append(atoms_list[ind])
+    if split_style == 'three_way':
+        for ind in ids[train_end:val_end]:
+            split_set['val'].append(atoms_list[ind])
+        for ind in ids[val_end:]:
+            split_set['test'].append(atoms_list[ind])
+    else:
+        for ind in ids[train_end:]:
+            split_set['test'].append(atoms_list[ind])
 
     return split_set
 
@@ -569,7 +593,8 @@ def analyze_dataset_statistics(lmdb_path, target_prop, output_dir=None, split_na
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Prepare crystal structure data for ML training"
+        description="Prepare crystal structure data for ML training",
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     
     parser.add_argument(
@@ -579,6 +604,13 @@ def parse_args():
         help='Path to CSV file containing material data'
     )
     
+    parser.add_argument(
+        '--test_csv_file',
+        type=str,
+        default=None,
+        help='Optional CSV file used as fixed test set (only for non-apply mode)'
+    )
+
     parser.add_argument(
         '--poscar_dir',
         type=str, 
@@ -606,11 +638,25 @@ def parse_args():
     )
     
     parser.add_argument(
+        '--split_style',
+        type=str,
+        choices=['three_way', 'holdout'],
+        default='three_way',
+        help='Split style: three_way=train/val/test, holdout=train/test'
+    )
+
+    parser.add_argument(
         '--split_ratios',
-        nargs=3,
+        nargs='+',
         type=float,
-        default=[0.8, 0.15, 0.05],
-        help='Split ratios for train/val/test (must sum to 1.0)'
+        default=None,
+        help=(
+            'Split ratios by mode:\n'
+            '  - three_way + no test_csv_file: 3 values (train val test)\n'
+            '  - three_way + test_csv_file:    2 values (train val)\n'
+            '  - holdout   + no test_csv_file: 2 values (train test)\n'
+            '  - holdout   + test_csv_file:    do not provide --split_ratios'
+        )
     )
     
     parser.add_argument(
@@ -654,10 +700,41 @@ def main():
     elif args.output_dir is None and args.apply:
         args.output_dir = f"set_apply"
 
-    # Validate split ratios
-    if abs(sum(args.split_ratios) - 1.0) > 1e-6 and not args.apply:
-        print("Error: Split ratios must sum to 1.0")
-        return
+    # Set default split ratios by style if not explicitly provided
+    if args.split_ratios is None and not args.apply:
+        if args.split_style == 'three_way' and args.test_csv_file is not None:
+            args.split_ratios = [0.8, 0.2]
+        elif args.split_style == 'three_way':
+            args.split_ratios = [0.8, 0.15, 0.05]
+        elif args.test_csv_file is None:
+            args.split_ratios = [0.8, 0.2]
+
+    # Validate split ratios strictly by mode
+    if not args.apply:
+        if args.split_style == 'three_way' and args.test_csv_file is not None:
+            if args.split_ratios is None or len(args.split_ratios) != 2:
+                print(
+                    "Error: --split_style three_way with --test_csv_file requires exactly 2 split ratios: train val"
+                )
+                return
+        elif args.split_style == 'three_way' and args.test_csv_file is None:
+            if args.split_ratios is None or len(args.split_ratios) != 3:
+                print("Error: --split_style three_way without --test_csv_file requires exactly 3 split ratios: train val test")
+                return
+        elif args.split_style == 'holdout' and args.test_csv_file is not None:
+            if args.split_ratios is not None:
+                print(
+                    "Error: --split_style holdout with --test_csv_file should not use --split_ratios"
+                )
+                return
+        elif args.split_style == 'holdout' and args.test_csv_file is None:
+            if args.split_ratios is None or len(args.split_ratios) != 2:
+                print("Error: --split_style holdout without --test_csv_file requires exactly 2 split ratios: train test")
+                return
+
+        if args.split_ratios is not None and abs(sum(args.split_ratios) - 1.0) > 1e-6:
+            print("Error: Split ratios must sum to 1.0")
+            return
     
     # store material id for cenvience.
     properties = {args.material_id    : args.material_id}
@@ -672,6 +749,15 @@ def main():
     except FileNotFoundError:
         print(f"Error: CSV file not found: {args.csv_file}")
         return
+
+    test_df = None
+    if args.test_csv_file is not None and not args.apply:
+        try:
+            test_df = pd.read_csv(args.test_csv_file)
+            print(f"Loaded {len(test_df)} compounds from {args.test_csv_file} (fixed test set)")
+        except FileNotFoundError:
+            print(f"Error: test CSV file not found: {args.test_csv_file}")
+            return
 
     # Limit dataset size if specified
     if args.max_samples is not None and args.max_samples > 0:
@@ -720,11 +806,42 @@ def main():
     if len(atoms_list) == 0:
         print("No structures were loaded. Check your data paths.")
         return
+
+    test_atoms_list = None
+    if test_df is not None:
+        print("\nConverting fixed test CSV to atoms list...")
+        test_atoms_list = db_to_atomslist(test_df, dir_poscar=args.poscar_dir,
+                                          properties=properties, material_id_col=args.material_id)
+        print(f"Successfully converted {len(test_atoms_list)} fixed test structures")
+        if len(test_atoms_list) == 0:
+            print("No structures were loaded from test_csv_file. Check your data paths.")
+            return
     
     if not args.apply:
-        print("Splitting dataset...")
-        split_set = split_dataset(atoms_list, ratio=args.split_ratios,
-                                seed=args.seed)
+        if test_atoms_list is not None:
+            print("Building split sets using fixed external test CSV...")
+            if args.split_style == 'three_way':
+                train_val_split = split_dataset(
+                    atoms_list,
+                    ratio=args.split_ratios,
+                    seed=args.seed,
+                    split_style='holdout'
+                )
+                split_set = {
+                    'train': train_val_split['train'],
+                    'val': train_val_split['test'],
+                    'test': test_atoms_list,
+                }
+            else:
+                split_set = {
+                    'train': atoms_list,
+                    'test': test_atoms_list,
+                }
+        else:
+            print("Splitting dataset...")
+            split_set = split_dataset(atoms_list, ratio=args.split_ratios,
+                                    seed=args.seed,
+                                    split_style=args.split_style)
     else:
         split_set  = {'apply' : atoms_list}
 

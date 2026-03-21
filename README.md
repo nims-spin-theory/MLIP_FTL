@@ -137,7 +137,7 @@ The target property and material ID column names are arbitrary and should match 
 
 This will generate a folder that contains the train/val/test dataset for model training and performance evaluation in the next step. In this example, the folder name is `set_formation_energy_(eV_atom)_train`. The output directory can be set using the `--output_dir` flag. Distribution plots are also included in this folder.
 
-For complete information on available parameters, run `python prepare_data.py -h`.
+Please check appendix at end for more information. For complete information on available parameters, run `python prepare_data.py -h`.
 
 #### 2. Training Formation Energy Model from Scratch
 
@@ -440,6 +440,33 @@ and eSEN model paper:
 
 - This is built on [FairChem](https://github.com/FAIR-Chem/fairchem) framework v1.10.0. Thanks a lot to the FairChem team for providing this powerful framework.
 
+
+## Appendix A: Advanced Dataset Split Modes
+
+The `prepare_data.py` script supports two split styles and an optional fixed external test set.
+
+- `--split_style`: choose dataset split logic
+    - `three_way`: produces `train.lmdb`, `val.lmdb`, `test.lmdb`
+    - `holdout`: produces `train.lmdb`, `test.lmdb`
+- `--test_csv_file`: optional CSV used as a fixed test set (instead of sampling test rows from `--csv_file`)
+
+**How `--csv_file` and `--test_csv_file` are used**
+
+- Without `--test_csv_file`:
+    - `--csv_file` data is splitted to train/val/test (three_way) or train/test (holdout)
+    - split behavior is controlled by `--split_style` and `--split_ratios`
+- With `--test_csv_file`:
+    - `--csv_file` is used for train-side data
+    - `--test_csv_file` is used as fixed test data
+    - when `--split_style three_way`, train-side data is split into train/val and test comes from `--test_csv_file`
+    - when `--split_style holdout`, train-side data is used as train and test comes from `--test_csv_file`
+
+**Strict `--split_ratios` rules**
+
+- `--split_style three_way` + no `--test_csv_file`: **3 values required** (`train val test`)
+- `--split_style three_way` + `--test_csv_file`: **2 values required** (`train val`)
+- `--split_style holdout` + no `--test_csv_file`: **2 values required** (`train test`)
+- `--split_style holdout` + `--test_csv_file`: **do not provide** `--split_ratios`
 
 
 
