@@ -448,25 +448,39 @@ The `prepare_data.py` script supports two split styles and an optional fixed ext
 - `--split_style`: choose dataset split logic
     - `three_way`: produces `train.lmdb`, `val.lmdb`, `test.lmdb`
     - `holdout`: produces `train.lmdb`, `test.lmdb`
+- `--val_csv_file`: optional CSV used as a fixed validation set (three_way only)
 - `--test_csv_file`: optional CSV used as a fixed test set (instead of sampling test rows from `--csv_file`)
 
-**How `--csv_file` and `--test_csv_file` are used**
+**How `--csv_file`, `--val_csv_file`, and `--test_csv_file` are used**
 
-- Without `--test_csv_file`:
+- Without external split files:
     - `--csv_file` data is splitted to train/val/test (three_way) or train/test (holdout)
     - split behavior is controlled by `--split_style` and `--split_ratios`
-- With `--test_csv_file`:
+- With `--test_csv_file` only:
     - `--csv_file` is used for train-side data
     - `--test_csv_file` is used as fixed test data
     - when `--split_style three_way`, train-side data is split into train/val and test comes from `--test_csv_file`
     - when `--split_style holdout`, train-side data is used as train and test comes from `--test_csv_file`
+- With `--val_csv_file` + `--test_csv_file` (three_way):
+        - `--csv_file` is used as train data
+        - `--val_csv_file` is used as validation data
+        - `--test_csv_file` is used as test data
+        - no split sampling is performed
 
 **Strict `--split_ratios` rules**
 
 - `--split_style three_way` + no `--test_csv_file`: **3 values required** (`train val test`)
 - `--split_style three_way` + `--test_csv_file`: **2 values required** (`train val`)
+- `--split_style three_way` + `--val_csv_file` + `--test_csv_file`: **ratios ignored**
 - `--split_style holdout` + no `--test_csv_file`: **2 values required** (`train test`)
-- `--split_style holdout` + `--test_csv_file`: **do not provide** `--split_ratios`
+- `--split_style holdout` + `--test_csv_file`: **ratios ignored**
+
+**Examples with explicit split files**
+
+- three_way from separate files:
+    - `python ../scripts/prepare_data.py --csv_file train.csv --val_csv_file val.csv --test_csv_file test.csv --target_property Formation_Energy --split_style three_way`
+- holdout from separate files:
+    - `python ../scripts/prepare_data.py --csv_file train.csv --test_csv_file test.csv --target_property Formation_Energy --split_style holdout`
 
 
 

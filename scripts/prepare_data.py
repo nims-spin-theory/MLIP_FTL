@@ -17,6 +17,14 @@ Usage examples:
     # train/val from one csv and fixed test from another csv
     python prepare_data.py --csv_file train_val.csv --test_csv_file test.csv \
                            --target_property Formation_Energy --split_style three_way
+
+    # explicit train/val/test CSV files in three_way mode
+    python prepare_data.py --csv_file train.csv --val_csv_file val.csv --test_csv_file test.csv \
+                           --target_property Formation_Energy --split_style three_way
+
+    # explicit train/test CSV files in holdout mode
+    python prepare_data.py --csv_file train.csv --test_csv_file test.csv \
+                           --target_property Formation_Energy --split_style holdout
     
     # Limit dataset size for testing or quick processing by -max_samples flag.
     python prepare_data.py ... --max_samples 1000 
@@ -308,32 +316,36 @@ def split_set_to_lmdb(split_set, properties, dir_name):
                 
                 # Add edge distance vectors if missing
                 if not hasattr(data, 'edge_distance_vec'):
-                    try:
-                        # Calculate edge vectors
-                        row, col = data.edge_index
-                        edge_vec = data.pos[row] - data.pos[col]
-                        
-                        # Handle periodic boundary conditions if available
-                        if hasattr(data, 'cell') and data.cell is not None:
-                            # Apply minimum image convention
-                            cell = data.cell.view(-1, 3)
-                            # Simplified PBC handling
-                            inv_cell = torch.linalg.pinv(cell)
-                            frac_vec = edge_vec @ inv_cell
-                            frac_vec = frac_vec - torch.round(frac_vec)
-                            edge_vec = frac_vec @ cell
-                        
-                        data.edge_distance_vec = edge_vec
-                        
-                        # Also ensure edge distances are available
-                        if not hasattr(data, 'distances'):
-                            data.distances = torch.norm(edge_vec, dim=1)
-                            
-                    except Exception as e:
-                        print(f"Warning: Failed to calculate edge vectors "
-                              f"for sample {fid}: {e}")
-                        conversion_skipped += 1
-                        continue
+                    print(f"Warning: No edge_distance_vec found for sample {fid}, skipping")
+                    conversion_skipped += 1
+                    continue    
+
+#                    try:
+#                        # Calculate edge vectors
+#                        row, col = data.edge_index
+#                        edge_vec = data.pos[row] - data.pos[col]
+#                        
+#                        # Handle periodic boundary conditions if available
+#                        if hasattr(data, 'cell') and data.cell is not None:
+#                            # Apply minimum image convention
+#                            cell = data.cell.view(-1, 3)
+#                            # Simplified PBC handling
+#                            inv_cell = torch.linalg.pinv(cell)
+#                            frac_vec = edge_vec @ inv_cell
+#                            frac_vec = frac_vec - torch.round(frac_vec)
+#                            edge_vec = frac_vec @ cell
+#                        
+#                        data.edge_distance_vec = edge_vec
+#                        
+#                        # Also ensure edge distances are available
+#                        if not hasattr(data, 'distances'):
+#                            data.distances = torch.norm(edge_vec, dim=1)
+#                            
+#                    except Exception as e:
+#                        print(f"Warning: Failed to calculate edge vectors "
+#                              f"for sample {fid}: {e}")
+#                        conversion_skipped += 1
+#                        continue
                 
                 # Assign sid and fid
                 data.sid = torch.LongTensor([0])
@@ -612,6 +624,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        '--val_csv_file',
+        type=str,
+        default=None,
+        help='Optional CSV file used as fixed validation set (only for non-apply three_way mode)'
+    )
+
+    parser.add_argument(
         '--poscar_dir',
         type=str, 
         default=None,
@@ -654,8 +673,9 @@ def parse_args():
             'Split ratios by mode:\n'
             '  - three_way + no test_csv_file: 3 values (train val test)\n'
             '  - three_way + test_csv_file:    2 values (train val)\n'
+            '  - three_way + val_csv_file + test_csv_file: split from explicit files (ratios ignored)\n'
             '  - holdout   + no test_csv_file: 2 values (train test)\n'
-            '  - holdout   + test_csv_file:    do not provide --split_ratios'
+            '  - holdout   + test_csv_file:    split from explicit files (ratios ignored)'
         )
     )
     
@@ -693,6 +713,17 @@ def main():
     Main function to process data and create LMDB databases.
     """
     args = parse_args()
+    explicit_three_way_files = (
+        not args.apply
+        and args.split_style == 'three_way'
+        and args.val_csv_file is not None
+        and args.test_csv_file is not None
+    )
+    explicit_holdout_files = (
+        not args.apply
+        and args.split_style == 'holdout'
+        and args.test_csv_file is not None
+    )
     
     # Set default output_dir based on target_property if not provided
     if args.output_dir is None and not args.apply:
@@ -702,7 +733,9 @@ def main():
 
     # Set default split ratios by style if not explicitly provided
     if args.split_ratios is None and not args.apply:
-        if args.split_style == 'three_way' and args.test_csv_file is not None:
+        if explicit_three_way_files or explicit_holdout_files:
+            pass
+        elif args.split_style == 'three_way' and args.test_csv_file is not None:
             args.split_ratios = [0.8, 0.2]
         elif args.split_style == 'three_way':
             args.split_ratios = [0.8, 0.15, 0.05]
@@ -711,29 +744,46 @@ def main():
 
     # Validate split ratios strictly by mode
     if not args.apply:
-        if args.split_style == 'three_way' and args.test_csv_file is not None:
+        if args.split_style == 'holdout' and args.val_csv_file is not None:
+            print("Error: --val_csv_file is only supported with --split_style three_way")
+            return
+
+        if args.split_style == 'three_way' and args.val_csv_file is not None and args.test_csv_file is None:
+            print("Error: --split_style three_way with --val_csv_file also requires --test_csv_file")
+            return
+
+        if args.split_style == 'three_way' and args.val_csv_file is None and args.test_csv_file is not None:
             if args.split_ratios is None or len(args.split_ratios) != 2:
                 print(
                     "Error: --split_style three_way with --test_csv_file requires exactly 2 split ratios: train val"
                 )
                 return
-        elif args.split_style == 'three_way' and args.test_csv_file is None:
+        elif args.split_style == 'three_way' and not explicit_three_way_files:
             if args.split_ratios is None or len(args.split_ratios) != 3:
                 print("Error: --split_style three_way without --test_csv_file requires exactly 3 split ratios: train val test")
                 return
-        elif args.split_style == 'holdout' and args.test_csv_file is not None:
+        elif args.split_style == 'holdout' and explicit_holdout_files:
             if args.split_ratios is not None:
-                print(
-                    "Error: --split_style holdout with --test_csv_file should not use --split_ratios"
-                )
-                return
+                print("Warning: --split_ratios is ignored when --split_style holdout uses --test_csv_file")
         elif args.split_style == 'holdout' and args.test_csv_file is None:
             if args.split_ratios is None or len(args.split_ratios) != 2:
                 print("Error: --split_style holdout without --test_csv_file requires exactly 2 split ratios: train test")
                 return
 
-        if args.split_ratios is not None and abs(sum(args.split_ratios) - 1.0) > 1e-6:
+        if explicit_three_way_files and args.split_ratios is not None:
+            print("Warning: --split_ratios is ignored when --split_style three_way uses --val_csv_file and --test_csv_file")
+
+        if (
+            args.split_ratios is not None
+            and not explicit_three_way_files
+            and not explicit_holdout_files
+            and abs(sum(args.split_ratios) - 1.0) > 1e-6
+        ):
             print("Error: Split ratios must sum to 1.0")
+            return
+    else:
+        if args.test_csv_file is not None or args.val_csv_file is not None:
+            print("Error: --apply does not support --test_csv_file or --val_csv_file")
             return
     
     # store material id for cenvience.
@@ -757,6 +807,15 @@ def main():
             print(f"Loaded {len(test_df)} compounds from {args.test_csv_file} (fixed test set)")
         except FileNotFoundError:
             print(f"Error: test CSV file not found: {args.test_csv_file}")
+            return
+
+    val_df = None
+    if args.val_csv_file is not None and not args.apply:
+        try:
+            val_df = pd.read_csv(args.val_csv_file)
+            print(f"Loaded {len(val_df)} compounds from {args.val_csv_file} (fixed validation set)")
+        except FileNotFoundError:
+            print(f"Error: validation CSV file not found: {args.val_csv_file}")
             return
 
     # Limit dataset size if specified
@@ -816,9 +875,26 @@ def main():
         if len(test_atoms_list) == 0:
             print("No structures were loaded from test_csv_file. Check your data paths.")
             return
+
+    val_atoms_list = None
+    if val_df is not None:
+        print("\nConverting fixed validation CSV to atoms list...")
+        val_atoms_list = db_to_atomslist(val_df, dir_poscar=args.poscar_dir,
+                                         properties=properties, material_id_col=args.material_id)
+        print(f"Successfully converted {len(val_atoms_list)} fixed validation structures")
+        if len(val_atoms_list) == 0:
+            print("No structures were loaded from val_csv_file. Check your data paths.")
+            return
     
     if not args.apply:
-        if test_atoms_list is not None:
+        if explicit_three_way_files:
+            print("Building split sets from explicit train/val/test CSV files...")
+            split_set = {
+                'train': atoms_list,
+                'val': val_atoms_list,
+                'test': test_atoms_list,
+            }
+        elif test_atoms_list is not None:
             print("Building split sets using fixed external test CSV...")
             if args.split_style == 'three_way':
                 train_val_split = split_dataset(
