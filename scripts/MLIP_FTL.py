@@ -62,6 +62,7 @@ import os
 import time
 import subprocess
 import shutil
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -611,8 +612,9 @@ def run_training(config_path, run_dir, job_name, base_model=None, gpu_id=0,
     Returns:
         str: Path to checkpoint directory
     """
-    log_file = f"log_train_{job_name}.txt"
-    warn_file = f"warn_train_{job_name}.txt"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = f"log_train_{job_name}_{timestamp}.txt"
+    warn_file = f"warn_train_{job_name}_{timestamp}.txt"
     
     # Construct training command
     cmd = [
@@ -701,6 +703,12 @@ def run_training(config_path, run_dir, job_name, base_model=None, gpu_id=0,
         # Copy config to checkpoint directory
         config_dest = os.path.join(cpdir, 'config.yml')
         subprocess.run(['cp', config_path, config_dest], check=True)
+        
+        # Copy log and warn files to checkpoint directory
+        log_dest = os.path.join(cpdir, os.path.basename(log_file))
+        warn_dest = os.path.join(cpdir, os.path.basename(warn_file))
+        subprocess.run(['cp', log_file, log_dest], check=True)
+        subprocess.run(['cp', warn_file, warn_dest], check=True)
         
         print(f"Checkpoint directory: {cpdir}/checkpoint.pt")
         return cpdir
@@ -826,8 +834,9 @@ def run_application(model_path, lmdb_path, run_dir, job_name, gpu_id=0,
     Returns:
         str: Path to checkpoint directory
     """
-    log_file = f"log_apply_{job_name}.txt"
-    warn_file = f"warn_apply_{job_name}.txt"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = f"log_apply_{job_name}_{timestamp}.txt"
+    warn_file = f"warn_apply_{job_name}_{timestamp}.txt"
 
     checkpoint_path = model_path
     config_path     = model_path.replace('checkpoint.pt', '/config.yml')
@@ -931,6 +940,12 @@ def run_application(model_path, lmdb_path, run_dir, job_name, gpu_id=0,
         # Copy config to checkpoint directory
         config_dest = os.path.join(cpdir, 'config.yml')
         subprocess.run(['cp', config_path, config_dest], check=True)
+        
+        # Copy log and warn files to checkpoint directory
+        log_dest = os.path.join(cpdir, os.path.basename(log_file))
+        warn_dest = os.path.join(cpdir, os.path.basename(warn_file))
+        subprocess.run(['cp', log_file, log_dest], check=True)
+        subprocess.run(['cp', warn_file, warn_dest], check=True)
         
         print(f"The model used: ")
         print(f"    \"{checkpoint_path}\"")
