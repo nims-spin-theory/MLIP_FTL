@@ -153,7 +153,9 @@ python ../scripts/MLIP_FTL.py --data_dir "set_formation_energy_(eV_atom)_train" 
 - `--data_dir`: Specifies the data directory created by `prepare_data.py`
 - `--num_layers`: Specifies the number of message-passing layers within the model
 - `--max_epochs`: Specifies the number of training epochs
-- `--head_reduce`: Controls atom pooling in the energy head (`mean` by default, or `sum`)
+- `--head_reduce`: Controls atom pooling in the output head (`mean` by default, or `sum`)
+   - `--head_reduce sum`   is appropriate for extensive properties (e.g., total energy)
+   - `--head_reduce mean`  is more suitable for intensive properties (e.g., energy per atom, band gap, thermal conductivity)
 
 The script prints information about the training procedure. The progress (e.g., epoch number) is appended to the log file:
 ```
