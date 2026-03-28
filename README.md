@@ -306,11 +306,6 @@ python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
 - `--transfer_layers`: Number of early layers to transfer when `--tl_mode partial` is used.
 - `--frozen_layers`: Number of frozen layers (layers that remain unchanged during training).
 
-**Transfer learning modes**
-
-- `--tl_mode full` (default): previous behavior. `--transfer_layers` is not required.
-- `--tl_mode partial`: requires both `--transfer_layers` and `--frozen_layers`, and `frozen_layers <= transfer_layers`.
-
 Example for partial transfer learning:
 
 ```bash
