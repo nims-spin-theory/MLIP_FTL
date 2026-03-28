@@ -6,7 +6,14 @@ This repository provides modifications and a user-friendly interface to FairChem
 
 A key feature is the implementation of frozen transfer learning (FTL). This approach reuses knowledge in pre-trained models, including universal machine-learning interatomic potential (uMLIP) eSEN-30M-OAM, to develop models for new property, reducing the amount of training data required while maintaining strong performance. We refer to this repo as `MLIP-FTL`, and distinguish it from our companion package [MLIP-HOT](https://github.com/nims-spin-theory/MLIP_HOT), which directly employs uMLIPs for structure optimization, formation energy, and convex-hull distance calculations.
 
-This implementation and its applications are detailed in our research paper: [npj Computational Materials (2026) XX:XX](https://www.nature.com/articles/s41524-026-02013-0). If you use this code or derive work from it, please cite this paper and FairChem package. Please open an issue if you encounter any bugs.
+This implementation and its applications are detailed in our research paper: [npj Computational Materials (2026) 12:133](https://www.nature.com/articles/s41524-026-02013-0). If you use this code or derive work from it, please cite this paper and FairChem package. Please open an issue if you encounter any bugs.
+
+### Benchmark
+<p align="center">
+    <img src="./benchmark/matbench_mean_mae_mad.png" alt="Critical temperature performance" width="1500">
+</p>
+
+This approach is benchmarked on [Matbench](https://matbench.materialsproject.org/). Matbench provides predefined splits, so all model performance is evaluated using a consistent split. In the figure above, the model has 10 message passing layers; all 10 are transferred from the eSEN-30M-OAM MLIP, and the top 7 layers are frozen during training (except for perovskites, where 5 layers are frozen).
 
 ### Key Features
 
@@ -16,10 +23,10 @@ This implementation and its applications are detailed in our research paper: [np
 - **Forked from FairChem v1**: This repository is a modified fork of FairChem v1, based on commit `d4dd224a0c2fdfab6bab550f6cc6463a9c29d48d`.
 
 > ### 🚧 Development Update
-> The current version is already good to use. We are also actively adding new features to make it even better, so please check back soon.
+> The current version is already good to use. We are also actively adding new features to make it better, so please check back soon.
 >
 > Coming up next:
-> 1. A benchmark for this approach.
+> 1. More benchmark for this approach.
 > 2. More details on training flags and hands-on training tips.
 
 
@@ -401,15 +408,18 @@ When using frozen transfer learning, you may encounter the following error:
 ## Citation
 
 If you use this code or derive work from it in your research, please cite our paper:
-[Need to update this after formal release]
 ```bibtex
-@article{npjcm_2026accuratescreeningfunctionalmaterials,
-	date = {2026/02/19},
-	doi = {10.1038/s41524-026-02013-0},
-	journal = {npj Computational Materials},
-	title = {Accurate screening of functional materials with machine-learning potential and transfer-learned regressions: Heusler alloy benchmark},
-	url = {https://doi.org/10.1038/s41524-026-02013-0},
-	year = {2026},
+@article{AccurateScreening2026,
+    title = {Accurate screening of functional materials with machine-learning potential and transfer-learned regressions: Heusler alloy benchmark},
+    author = {Xiao, Enda and Tadano, Terumasa},
+    journal = {npj Computational Materials},
+    year = {2026},
+    volume = {12},
+    pages = {133},
+    publisher = {Nature Publishing Group},
+    doi = {10.1038/s41524-026-02013-0},
+    issn = {2057-3960},
+    url = {https://www.nature.com/articles/s41524-026-02013-0},
 }
 ```
 
