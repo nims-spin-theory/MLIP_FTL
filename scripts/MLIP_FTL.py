@@ -816,98 +816,86 @@ def plot_performance(df, target_property, output_prefix):
     print(f"{'Data Points':<20}{len(df)}")
 
 
-def run_application(model_path, lmdb_path, run_dir, job_name, gpu_id=0,
-                    print_every=50, cpu_only=False, num_gpus=1):
+def run_predict(checkpoint_path, config_path, run_dir, job_name,
+                lmdb_override=None, log_prefix="predict",
+                gpu_id=0, print_every=50, cpu_only=False, num_gpus=1,
+                copy_artifacts=False):
     """
-    Execute predicition application process using fairchem.
-    
+    Run prediction using a specific checkpoint and config.
+
     Args:
-        model_path (str): Path to the model checkpoint file
-        lmdb_path (str): Path to the LMDB database containing compounds will be predicted.
-        run_dir (str): Output directory for results
-        job_name (str): Identifier for the prediction application job
-        gpu_id (int): Starting GPU device ID (for single GPU or multi-GPU)
-        print_every (int): Frequency of progress printing
-        cpu_only (bool): Whether to use CPU-only mode
-        num_gpus (int): Number of GPUs to use
-        
+        checkpoint_path (str): Path to checkpoint file used for prediction.
+        config_path (str): Path to base config YAML file.
+        run_dir (str): Output directory for FairChem run artifacts.
+        job_name (str): Identifier for this prediction run.
+        lmdb_override (str | None): If given, a patched copy of config_path is created
+            with dataset.test.src updated to this path before running prediction.
+        log_prefix (str): Prefix for log/warn file names (e.g. 'apply', 'eval').
+        gpu_id (int): Starting GPU device ID (single GPU or first of multiple).
+        print_every (int): Frequency of progress printing.
+        cpu_only (bool): Whether to force CPU-only mode.
+        num_gpus (int): Number of GPUs to use.
+        copy_artifacts (bool): If True, copy the original config and log files into cpdir.
+
     Returns:
-        str: Path to checkpoint directory
+        str | None: Prediction checkpoint directory if successful, else None.
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = f"log_apply_{job_name}_{timestamp}.txt"
-    warn_file = f"warn_apply_{job_name}_{timestamp}.txt"
+    log_file = f"log_{log_prefix}_{job_name}_{timestamp}.txt"
+    warn_file = f"warn_{log_prefix}_{job_name}_{timestamp}.txt"
 
-    checkpoint_path = model_path
-    config_path     = model_path.replace('checkpoint.pt', '/config.yml')
-    
-    # update config file for prediction application
-    shutil.copy(config_path, './config_apply.yml')
-    # read config yml file
-    with open('./config_apply.yml') as f:
-        config_yml = yaml.safe_load(f)
-    # change dir to application set
-    config_yml["dataset"]["test"]["src"] = lmdb_path
-    # get target name 
-    target = list(config_yml["dataset"]["train"]["key_mapping"].keys())[0]
-    # save back to YAML
-    with open('./config_apply.yml', "w") as f:
-        yaml.safe_dump(config_yml, f, sort_keys=False)
-        
-    # Construct training command
+    # Optionally patch config to redirect the test dataset
+    if lmdb_override is not None:
+        patched_config = f"config_{log_prefix}.yml"
+        shutil.copy(config_path, patched_config)
+        with open(patched_config) as f:
+            config_yml = yaml.safe_load(f)
+        config_yml["dataset"]["test"]["src"] = lmdb_override
+        with open(patched_config, "w") as f:
+            yaml.safe_dump(config_yml, f, sort_keys=False)
+        effective_config = patched_config
+    else:
+        effective_config = config_path
+
     cmd = [
         str(fairchem_main()),
         '--mode', 'predict',
-        '--config-yml', './config_apply.yml',
+        '--config-yml', effective_config,
         '--run-dir', run_dir,
         '--identifier', job_name,
         '--print-every', str(print_every),
         '--checkpoint', checkpoint_path,
     ]
-    if num_gpus>1:
-        cmd = ['torchrun', '--standalone', '--nnodes=1',  '--nproc_per_node=1', ] + cmd
+    if num_gpus > 1:
+        cmd = ['torchrun', '--standalone', '--nnodes=1', '--nproc_per_node=1'] + cmd
         cmd += ['--num-gpus', str(num_gpus)]
     else:
         cmd = ['python'] + cmd
 
-    # Set environment variables
     env = os.environ.copy()
-    
     if not cpu_only:
         if num_gpus == 1:
-            # Single GPU mode
             env['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
             print(f"Using single GPU: {gpu_id}")
         else:
-            # Multi-GPU mode: use consecutive GPUs starting from gpu_id
             gpu_list = ','.join(str(gpu_id + i) for i in range(num_gpus))
             env['CUDA_VISIBLE_DEVICES'] = gpu_list
             print(f"Using multiple GPUs: {gpu_list}")
     else:
-        # Disable CUDA for CPU-only mode
         env['CUDA_VISIBLE_DEVICES'] = ''
         print("Using CPU-only mode")
-    
-    # Set distributed training environment variables
+
     env['MASTER_ADDR'] = 'localhost'
     env['MASTER_PORT'] = '12355'
     env['RANK'] = '0'
     env['WORLD_SIZE'] = str(num_gpus) if num_gpus > 1 else '1'
     env['LOCAL_RANK'] = '0'
-    
-    # print("Environment variables:")
-    # print(f"  CUDA_VISIBLE_DEVICES: "
-    #       f"{env.get('CUDA_VISIBLE_DEVICES', 'not set')}")
-    # print(f"  WORLD_SIZE: {env.get('WORLD_SIZE')}")
-    # print(f"  Distributed prediction process: {num_gpus > 1}")
-    
-    print(f"Starting prediction: {target}")
+
+    print(f"Starting prediction: {job_name}")
     print(f"Command: {' '.join(cmd)}")
     print(f"Logs are written to: {log_file}, {warn_file}")
-    
-    # Execute training
+
     start_time = time.time()
-    
     with open(log_file, 'w') as log_f, open(warn_file, 'w') as warn_f:
         process = subprocess.run(
             cmd,
@@ -916,16 +904,15 @@ def run_application(model_path, lmdb_path, run_dir, job_name, gpu_id=0,
             stderr=warn_f,
             text=True
         )
-    
+
     elapsed_time = time.time() - start_time
-    print(f'Prediction application completed in {elapsed_time:.1f} seconds')
-    
+    print(f'Prediction completed in {elapsed_time:.1f} seconds')
+
     if process.returncode != 0:
-        print(f"Prediction application failed with return code {process.returncode}")
+        print(f"Prediction failed with return code {process.returncode}")
         print(f"Check {warn_file} for error details")
         return None
-    
-    # Extract checkpoint directory from log
+
     try:
         cpdir = None
         with open(log_file, 'r') as f:
@@ -933,28 +920,72 @@ def run_application(model_path, lmdb_path, run_dir, job_name, gpu_id=0,
                 if 'checkpoint_dir:' in line:
                     cpdir = line.split(':')[-1].strip()
                     break
-        
+
         if cpdir is None:
-            raise ValueError("Checkpoint directory not found in log")
-        
-        # Copy config to checkpoint directory
-        config_dest = os.path.join(cpdir, 'config.yml')
-        subprocess.run(['cp', config_path, config_dest], check=True)
-        
-        # Copy log and warn files to checkpoint directory
-        log_dest = os.path.join(cpdir, os.path.basename(log_file))
-        warn_dest = os.path.join(cpdir, os.path.basename(warn_file))
-        subprocess.run(['cp', log_file, log_dest], check=True)
-        subprocess.run(['cp', warn_file, warn_dest], check=True)
-        
+            raise ValueError("Checkpoint directory not found in prediction log")
+
+        if copy_artifacts:
+            config_dest = os.path.join(cpdir, 'config.yml')
+            subprocess.run(['cp', config_path, config_dest], check=True)
+            log_dest = os.path.join(cpdir, os.path.basename(log_file))
+            warn_dest = os.path.join(cpdir, os.path.basename(warn_file))
+            subprocess.run(['cp', log_file, log_dest], check=True)
+            subprocess.run(['cp', warn_file, warn_dest], check=True)
+
+        return cpdir
+
+    except Exception as e:
+        print(f"Error extracting prediction checkpoint directory: {e}")
+        return None
+
+
+def run_application(checkpoint_path, lmdb_path, run_dir, job_name, gpu_id=0,
+                    print_every=50, cpu_only=False, num_gpus=1):
+    """
+    Execute application of trained model.
+
+    Args:
+        checkpoint_path (str): Path to the trained model checkpoint file.
+        lmdb_path (str): Path to the LMDB database containing compounds to predict.
+        run_dir (str): Output directory for results.
+        job_name (str): Identifier for the prediction application job.
+        gpu_id (int): Starting GPU device ID (for single GPU or multi-GPU).
+        print_every (int): Frequency of progress printing.
+        cpu_only (bool): Whether to use CPU-only mode.
+        num_gpus (int): Number of GPUs to use.
+
+    Returns:
+        str | None: Path to checkpoint directory if successful, else None.
+    """
+    config_path = checkpoint_path.replace('checkpoint.pt', '/config.yml')
+
+    # Display target property name before launch
+    with open(config_path) as f:
+        config_yml = yaml.safe_load(f)
+    target = list(config_yml["dataset"]["train"]["key_mapping"].keys())[0]
+    print(f"Starting prediction for: {target}")
+
+    cpdir = run_predict(
+        checkpoint_path=checkpoint_path,
+        config_path=config_path,
+        run_dir=run_dir,
+        job_name=job_name,
+        lmdb_override=lmdb_path,
+        log_prefix="apply",
+        gpu_id=gpu_id,
+        print_every=print_every,
+        cpu_only=cpu_only,
+        num_gpus=num_gpus,
+        copy_artifacts=True,
+    )
+
+    if cpdir is not None:
         print(f"The model used: ")
         print(f"    \"{checkpoint_path}\"")
-        return cpdir
-        
-    except Exception as e:
-        print(f"Error extracting checkpoint directory: {e}")
-        return None
-    
+    return cpdir
+
+
+
 
 def parse_args():
     """Parse command line arguments."""
@@ -1396,7 +1427,7 @@ def main():
                 
         # Evaluation phase
         print("\n" + "="*50)
-        print("EVALUATION PHASE")
+        print("FINAL CHECKPOINT EVALUATION")
         print("="*50)
         
         # Test data path
@@ -1415,6 +1446,55 @@ def main():
             material_id=args.material_id,
             output_prefix=output_prefix
         )
+
+        best_csv_output = None
+        best_plot_output = None
+
+        if not is_holdout_style:
+            best_checkpoint_path = os.path.join(cpdir, "best_checkpoint.pt")
+            if os.path.exists(best_checkpoint_path):
+                print("\n" + "="*50)
+                print("BEST CHECKPOINT EVALUATION")
+                print("="*50)
+
+                best_eval_identifier = f"{args.job_name}_best_eval"
+                best_pred_cpdir = run_predict(
+                    checkpoint_path=best_checkpoint_path,
+                    config_path=os.path.join(cpdir, "config.yml"),
+                    run_dir=args.output_dir,
+                    job_name=best_eval_identifier,
+                    log_prefix="eval",
+                    gpu_id=args.gpu_id,
+                    cpu_only=args.cpu_only,
+                    num_gpus=args.num_gpus,
+                )
+
+                if best_pred_cpdir is not None:
+                    best_prd_path = best_pred_cpdir.replace('checkpoints', 'results') + '/ocp_predictions.npz'
+                    best_df = collect_result(
+                        test_data_path,
+                        best_prd_path,
+                        target=args.target_property,
+                        material_id=args.material_id,
+                        application=False,
+                    )
+                    best_csv_output = (
+                        f"{cpdir}/performance_best_"
+                        f"{args.target_property.replace(' ','_').replace('/','_')}.csv"
+                    )
+                    best_df.to_csv(best_csv_output, index=False)
+                    print(f"Prediction of test set using best checkpoint is saved to: {best_csv_output}")
+
+                    best_output_prefix = os.path.join(cpdir, "performance_best")
+                    plot_performance(best_df, args.target_property, best_output_prefix)
+                    best_plot_output = (
+                        f"{best_output_prefix}_"
+                        f"{args.target_property.replace(' ','_').replace('/','_')}.png"
+                    )
+                else:
+                    print("Warning: Best checkpoint prediction failed; skipping best-checkpoint CSV export.")
+            else:
+                print(f"Warning: best_checkpoint.pt not found at {best_checkpoint_path}")
         
         # Generate performance plot
         plot_performance(df, args.target_property, os.path.join(cpdir, output_prefix))
@@ -1435,8 +1515,14 @@ def main():
             print(f"    \"{cpdir}/best_checkpoint.pt\"")
         print("Prediction results of test set (final model used):")
         print(f"    \"{cpdir}/performance_{args.target_property.replace(' ','_').replace('/','_')}.csv\"")
+        if best_csv_output is not None:
+            print("Prediction results of test set (best checkpoint used):")
+            print(f"    \"{best_csv_output}\"")
         print("Performance plot (final model used):")
         print(f"    \"{cpdir}/performance_{args.target_property.replace(' ','_').replace('/','_')}.png\"")
+        if best_plot_output is not None:
+            print("Performance plot (best checkpoint used):")
+            print(f"    \"{best_plot_output}\"")
         # print(f"Results saved in: {args.output_dir}")
 
     elif args.apply:
@@ -1460,8 +1546,8 @@ def main():
             args.job_name = "predict"
 
         cpdir = run_application(
-                model_path = args.model_path, 
-                lmdb_path  = args.lmdb_path, 
+                checkpoint_path = args.model_path,
+                lmdb_path       = args.lmdb_path, 
                 run_dir    = args.output_dir,
                 job_name   = args.job_name,
                 gpu_id     = args.gpu_id,
