@@ -844,18 +844,23 @@ def run_predict(checkpoint_path, config_path, run_dir, job_name,
     log_file = f"log_{log_prefix}_{job_name}_{timestamp}.txt"
     warn_file = f"warn_{log_prefix}_{job_name}_{timestamp}.txt"
 
-    # Optionally patch config to redirect the test dataset
+
+    patched_config = f"config_{log_prefix}.yml"
+    shutil.copy(config_path, patched_config)
+    with open(patched_config) as f:
+        config_yml = yaml.safe_load(f)
+
+    # change to full TL mode for prediction to ensure all layers are used for inference
+    config_yml['optim']['TL_mode'] = 'full'  
+    if config_yml and 'TL_transfer_layers' in config_yml.get('optim', {}):
+        del config_yml['optim']['TL_transfer_layers']
+    # change dataset.test.src if lmdb_override is provided
     if lmdb_override is not None:
-        patched_config = f"config_{log_prefix}.yml"
-        shutil.copy(config_path, patched_config)
-        with open(patched_config) as f:
-            config_yml = yaml.safe_load(f)
         config_yml["dataset"]["test"]["src"] = lmdb_override
-        with open(patched_config, "w") as f:
-            yaml.safe_dump(config_yml, f, sort_keys=False)
-        effective_config = patched_config
-    else:
-        effective_config = config_path
+    with open(patched_config, "w") as f:
+        yaml.safe_dump(config_yml, f, sort_keys=False)
+    effective_config = patched_config
+    
 
     cmd = [
         str(fairchem_main()),
@@ -1425,10 +1430,11 @@ def main():
             print("Training failed. Exiting.")
             return
                 
-        # Evaluation phase
-        print("\n" + "="*50)
-        print("FINAL CHECKPOINT EVALUATION")
-        print("="*50)
+        # Block below replaced by explicit evaluation        
+        # # Evaluation phase
+        # print("\n" + "="*50)
+        # print("FINAL CHECKPOINT EVALUATION")
+        # print("="*50)
         
         # Test data path
         test_data_path = os.path.join(args.data_dir, "test.lmdb")
@@ -1450,12 +1456,62 @@ def main():
         best_csv_output = None
         best_plot_output = None
 
+        if True:
+            final_checkpoint_path = os.path.join(cpdir, "checkpoint.pt")
+            if os.path.exists(final_checkpoint_path):
+                print("\n" + "="*50)
+                print("FINAL CHECKPOINT EVALUATION")
+                print("="*50)
+                print("Evaluating the final checkpoint based on test set performance...\n")
+
+                final_eval_identifier = f"{args.job_name}_final_eval"
+                final_pred_cpdir = run_predict(
+                    checkpoint_path=final_checkpoint_path,
+                    config_path=os.path.join(cpdir, "config.yml"),
+                    run_dir=args.output_dir,
+                    job_name=final_eval_identifier,
+                    log_prefix="eval",
+                    gpu_id=args.gpu_id,
+                    cpu_only=args.cpu_only,
+                    num_gpus=args.num_gpus,
+                )
+
+                if final_pred_cpdir is not None:
+                    final_prd_path = final_pred_cpdir.replace('checkpoints', 'results') + '/ocp_predictions.npz'
+                    final_df = collect_result(
+                        test_data_path,
+                        final_prd_path,
+                        target=args.target_property,
+                        material_id=args.material_id,
+                        application=False,
+                    )
+                    final_csv_output = (
+                        f"{cpdir}/performance_final_"
+                        f"{args.target_property.replace(' ','_').replace('/','_')}.csv"
+                    )
+                    final_df.to_csv(final_csv_output, index=False)
+                    # print(f"Prediction of test set using final checkpoint is saved to: {final_csv_output}")
+
+                    final_output_prefix = os.path.join(cpdir, "performance_final")
+                    plot_performance(final_df, args.target_property, final_output_prefix)
+                    final_plot_output = (
+                        f"{final_output_prefix}_"
+                        f"{args.target_property.replace(' ','_').replace('/','_')}.png"
+                    )
+                else:
+                    print("Warning: Best checkpoint prediction failed; skipping best-checkpoint CSV export.")
+            else:
+                print(f"Warning: best_checkpoint.pt not found at {best_checkpoint_path}")
+
+
         if not is_holdout_style:
             best_checkpoint_path = os.path.join(cpdir, "best_checkpoint.pt")
             if os.path.exists(best_checkpoint_path):
                 print("\n" + "="*50)
                 print("BEST CHECKPOINT EVALUATION")
                 print("="*50)
+                print("Dataset contains train/val/test sets. Selecting best checkpoint based on val set performance.")
+                print("Evaluating best checkpoint selected based on test set performance...\n")
 
                 best_eval_identifier = f"{args.job_name}_best_eval"
                 best_pred_cpdir = run_predict(
@@ -1496,8 +1552,8 @@ def main():
             else:
                 print(f"Warning: best_checkpoint.pt not found at {best_checkpoint_path}")
         
-        # Generate performance plot
-        plot_performance(df, args.target_property, os.path.join(cpdir, output_prefix))
+        # # Generate performance plot
+        # plot_performance(df, args.target_property, os.path.join(cpdir, output_prefix))
         
         print("\n" + "="*50)
         print("TRAINING AND EVALUATION COMPLETED")
@@ -1514,12 +1570,12 @@ def main():
             print("Best model based on validation set:")
             print(f"    \"{cpdir}/best_checkpoint.pt\"")
         print("Prediction results of test set (final model used):")
-        print(f"    \"{cpdir}/performance_{args.target_property.replace(' ','_').replace('/','_')}.csv\"")
+        print(f"    \"{final_csv_output}\"")
         if best_csv_output is not None:
             print("Prediction results of test set (best checkpoint used):")
             print(f"    \"{best_csv_output}\"")
         print("Performance plot (final model used):")
-        print(f"    \"{cpdir}/performance_{args.target_property.replace(' ','_').replace('/','_')}.png\"")
+        print(f"    \"{final_plot_output}\"")
         if best_plot_output is not None:
             print("Performance plot (best checkpoint used):")
             print(f"    \"{best_plot_output}\"")
