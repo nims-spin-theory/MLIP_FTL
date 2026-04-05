@@ -962,8 +962,10 @@ def run_application(checkpoint_path, lmdb_path, run_dir, job_name, gpu_id=0,
     Returns:
         str | None: Path to checkpoint directory if successful, else None.
     """
-    config_path = checkpoint_path.replace('checkpoint.pt', '/config.yml')
-
+    print(f"Running application with checkpoint: {checkpoint_path}")
+    config_path = checkpoint_path.replace("best_checkpoint.pt", "config.yml")
+    config_path = config_path.replace("checkpoint.pt", "config.yml")
+    
     # Display target property name before launch
     with open(config_path) as f:
         config_yml = yaml.safe_load(f)
@@ -1592,7 +1594,9 @@ def main():
         print("="*50)
 
         # get target name 
-        config_path     = args.model_path.replace('checkpoint.pt', '/config.yml')
+        config_path     = args.model_path.replace("best_checkpoint.pt", "config.yml")
+        config_path     = config_path.replace("checkpoint.pt", "config.yml")
+
         with open(config_path) as f:
             config_yml = yaml.safe_load(f)
             target_property = list(config_yml["dataset"]["train"]["key_mapping"].keys())[0]
