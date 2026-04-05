@@ -453,7 +453,7 @@ def create_config_file(config_path, data_dir, target_property,
     val_path = f'{data_dir}/val.lmdb'
     test_path = f'{data_dir}/test.lmdb'
     if not os.path.exists(val_path) and os.path.exists(test_path):
-        # Holdout mode from prepare_data.py creates only train/test.
+        # two_way mode from prepare_data.py creates only train/test.
         # Reuse test split for validation so FairChem can still run validation.
         val_path = test_path
 
@@ -1285,7 +1285,7 @@ def main():
         train_lmdb_path = os.path.join(args.data_dir, "train.lmdb")
         val_lmdb_path = os.path.join(args.data_dir, "val.lmdb")
         test_lmdb_path = os.path.join(args.data_dir, "test.lmdb")
-        is_holdout_style = (not os.path.exists(val_lmdb_path) and os.path.exists(test_lmdb_path))
+        is_two_way_style = (not os.path.exists(val_lmdb_path) and os.path.exists(test_lmdb_path))
 
         if not args.dryrun:
             if not os.path.exists(train_lmdb_path):
@@ -1295,15 +1295,20 @@ def main():
                 print(f"Error: Test data not found: {test_lmdb_path}")
                 return
 
-            if is_holdout_style:
+            if is_two_way_style:
                 print("\n" + "="*50)
-                print("HOLDOUT MODE DETECTED")
+                print("TWO_WAY MODE DETECTED")
                 print("="*50)
-                print(
-                    "No val.lmdb found. This run uses holdout-style training: "
-                    "test.lmdb is reused as val.lmdb in the generated config."
-                )
-        
+                print("No val.lmdb found. This run uses two_way-style training. ")
+                print("Final checkpoint after max_epochs will be saved and evaluated." )
+                print("Unlike three_way mode training, no best checkpoint is selected based on validation performance.")
+            else:
+                print("\n" + "="*50)
+                print("THREE_WAY MODE DETECTED")
+                print("="*50)
+                print("train.lmdb, val.lmdb and test.lmdb are all found. This run uses three_way-style training.")
+                print("Final checkpoint after max_epochs will be saved and evaluated." )
+                print("The best checkpoint based on validation performance will also be saved during training.")
         print("\n" + "="*50)
         print("TRAINING CONFIGURATION")
         print("="*50)
@@ -1327,8 +1332,8 @@ def main():
         print(f"  Base Model: {args.base_model}")
         print(f"  CPU Only: {args.cpu_only}")
         print(f"  Dry Run: {args.dryrun}")
-        if is_holdout_style:
-            print("  Split Style: holdout (val uses test.lmdb)")
+        if is_two_way_style:
+            print("  Split Style: two_way (val uses test.lmdb)")
         
         # Optimize batch size if requested
         if args.auto_batch_size and not args.cpu_only:
@@ -1504,7 +1509,7 @@ def main():
                 print(f"Warning: best_checkpoint.pt not found at {best_checkpoint_path}")
 
 
-        if not is_holdout_style:
+        if not is_two_way_style:
             best_checkpoint_path = os.path.join(cpdir, "best_checkpoint.pt")
             if os.path.exists(best_checkpoint_path):
                 print("\n" + "="*50)
@@ -1560,10 +1565,10 @@ def main():
         print("="*50)
         print("\nTraining and evaluation completed successfully!")
         print(f"Model checkpoint:")
-        if is_holdout_style:  
+        if is_two_way_style:  
             print("Final model at the end of training:")
             print(f"    \"{cpdir}/checkpoint.pt\"")
-            print("No separate validation set (holdout-style training), so no checkpoint selected based on validation set.")
+            print("No separate validation set (two_way-style training), so no checkpoint selected based on validation set.")
         else:
             print("Final model at the end of training:")
             print(f"    \"{cpdir}/checkpoint.pt\"")

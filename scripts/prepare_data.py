@@ -22,9 +22,9 @@ Usage examples:
     python prepare_data.py --csv_file train.csv --val_csv_file val.csv --test_csv_file test.csv \
                            --target_property Formation_Energy --split_style three_way
 
-    # explicit train/test CSV files in holdout mode
+    # explicit train/test CSV files in two_way mode
     python prepare_data.py --csv_file train.csv --test_csv_file test.csv \
-                           --target_property Formation_Energy --split_style holdout
+                           --target_property Formation_Energy --split_style two_way
     
     # Limit dataset size for testing or quick processing by -max_samples flag.
     python prepare_data.py ... --max_samples 1000 
@@ -134,9 +134,9 @@ def split_dataset(atoms_list, ratio=[0.8, 0.1, 0.1], seed=None, split_style='thr
     Args:
         atoms_list (list): List of ASE atoms objects
         ratio (list): Split ratios for [train, val, test] (three_way)
-                  or [train, test] (holdout)
+              or [train, test] (two_way)
         seed (int): Random seed for reproducibility
-        split_style (str): Split strategy ('three_way' or 'holdout')
+        split_style (str): Split strategy ('three_way' or 'two_way')
         
     Returns:
         dict: Dictionary with split keys based on split_style
@@ -146,12 +146,12 @@ def split_dataset(atoms_list, ratio=[0.8, 0.1, 0.1], seed=None, split_style='thr
     assert np.isclose(ratio.sum(), 1.0), "Ratios must sum to 1.0"
     ratio /= ratio.sum()    
 
-    if split_style not in ['three_way', 'holdout']:
+    if split_style not in ['three_way', 'two_way']:
         raise ValueError(f"Unknown split_style: {split_style}")
     if split_style == 'three_way' and len(ratio) != 3:
         raise ValueError("three_way split requires 3 ratios: train val test")
-    if split_style == 'holdout' and len(ratio) != 2:
-        raise ValueError("holdout split requires 2 ratios: train test")
+    if split_style == 'two_way' and len(ratio) != 2:
+        raise ValueError("two_way split requires 2 ratios: train test")
 
     train_end = int(N * ratio[0])
     if split_style == 'three_way':
@@ -659,9 +659,9 @@ def parse_args():
     parser.add_argument(
         '--split_style',
         type=str,
-        choices=['three_way', 'holdout'],
+        choices=['three_way', 'two_way', 'holdout'],
         default='three_way',
-        help='Split style: three_way=train/val/test, holdout=train/test'
+        help='Split style: three_way=train/val/test, two_way=train/test (holdout is deprecated alias)'
     )
 
     parser.add_argument(
@@ -674,8 +674,8 @@ def parse_args():
             '  - three_way + no test_csv_file: 3 values (train val test)\n'
             '  - three_way + test_csv_file:    2 values (train val)\n'
             '  - three_way + val_csv_file + test_csv_file: split from explicit files (ratios ignored)\n'
-            '  - holdout   + no test_csv_file: 2 values (train test)\n'
-            '  - holdout   + test_csv_file:    split from explicit files (ratios ignored)'
+            '  - two_way   + no test_csv_file: 2 values (train test)\n'
+            '  - two_way   + test_csv_file:    split from explicit files (ratios ignored)'
         )
     )
     
@@ -713,15 +713,19 @@ def main():
     Main function to process data and create LMDB databases.
     """
     args = parse_args()
+    if args.split_style == 'holdout':
+        print("Warning: --split_style holdout is deprecated; use --split_style two_way instead.")
+        args.split_style = 'two_way'
+
     explicit_three_way_files = (
         not args.apply
         and args.split_style == 'three_way'
         and args.val_csv_file is not None
         and args.test_csv_file is not None
     )
-    explicit_holdout_files = (
+    explicit_two_way_files = (
         not args.apply
-        and args.split_style == 'holdout'
+        and args.split_style == 'two_way'
         and args.test_csv_file is not None
     )
     
@@ -733,7 +737,7 @@ def main():
 
     # Set default split ratios by style if not explicitly provided
     if args.split_ratios is None and not args.apply:
-        if explicit_three_way_files or explicit_holdout_files:
+        if explicit_three_way_files or explicit_two_way_files:
             pass
         elif args.split_style == 'three_way' and args.test_csv_file is not None:
             args.split_ratios = [0.8, 0.2]
@@ -744,7 +748,7 @@ def main():
 
     # Validate split ratios strictly by mode
     if not args.apply:
-        if args.split_style == 'holdout' and args.val_csv_file is not None:
+        if args.split_style == 'two_way' and args.val_csv_file is not None:
             print("Error: --val_csv_file is only supported with --split_style three_way")
             return
 
@@ -762,12 +766,12 @@ def main():
             if args.split_ratios is None or len(args.split_ratios) != 3:
                 print("Error: --split_style three_way without --test_csv_file requires exactly 3 split ratios: train val test")
                 return
-        elif args.split_style == 'holdout' and explicit_holdout_files:
+        elif args.split_style == 'two_way' and explicit_two_way_files:
             if args.split_ratios is not None:
-                print("Warning: --split_ratios is ignored when --split_style holdout uses --test_csv_file")
-        elif args.split_style == 'holdout' and args.test_csv_file is None:
+                print("Warning: --split_ratios is ignored when --split_style two_way uses --test_csv_file")
+        elif args.split_style == 'two_way' and args.test_csv_file is None:
             if args.split_ratios is None or len(args.split_ratios) != 2:
-                print("Error: --split_style holdout without --test_csv_file requires exactly 2 split ratios: train test")
+                print("Error: --split_style two_way without --test_csv_file requires exactly 2 split ratios: train test")
                 return
 
         if explicit_three_way_files and args.split_ratios is not None:
@@ -776,7 +780,7 @@ def main():
         if (
             args.split_ratios is not None
             and not explicit_three_way_files
-            and not explicit_holdout_files
+            and not explicit_two_way_files
             and abs(sum(args.split_ratios) - 1.0) > 1e-6
         ):
             print("Error: Split ratios must sum to 1.0")
@@ -901,7 +905,7 @@ def main():
                     atoms_list,
                     ratio=args.split_ratios,
                     seed=args.seed,
-                    split_style='holdout'
+                    split_style='two_way'
                 )
                 split_set = {
                     'train': train_val_split['train'],
