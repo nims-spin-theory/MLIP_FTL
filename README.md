@@ -144,7 +144,7 @@ The target property and material ID column names are arbitrary and should match 
 
 This will generate a folder that contains the train/val/test dataset for model training and performance evaluation in the next step. In this example, the folder name is `set_formation_energy_(eV_atom)_train`. The output directory can be set using the `--output_dir` flag. Distribution plots are also included in this folder.
 
-For complete information on available parameters, run `python prepare_data.py -h`.
+Please check appendix at end for more information. For complete information on available parameters, run `python prepare_data.py -h`.
 
 #### 2. Training Formation Energy Model from Scratch
 
@@ -447,6 +447,47 @@ and eSEN model paper:
 
 - This is built on [FairChem](https://github.com/FAIR-Chem/fairchem) framework v1.10.0. Thanks a lot to the FairChem team for providing this powerful framework.
 
+
+## Appendix A: Advanced Dataset Split and Preparation
+
+The `prepare_data.py` script supports two split styles and can specify csv files for val and test set.
+
+- `--split_style`: choose dataset split logic
+    - `three_way`: produces `train.lmdb`, `val.lmdb`, `test.lmdb`
+    - `two_way`: produces `train.lmdb`, `test.lmdb`
+- `--val_csv_file`: optional CSV used as a fixed validation set (instead of sampling val set from `--csv_file`)
+- `--test_csv_file`: optional CSV used as a fixed test set (instead of sampling test set from `--csv_file`)
+
+**How `--csv_file`, `--val_csv_file`, and `--test_csv_file` are used**
+
+- Without external split files:
+    - `--csv_file` data is splitted to train/val/test (three_way) or train/test (two_way)
+    - split behavior is controlled by `--split_style` and `--split_ratios`
+- With `--test_csv_file` only:
+    - `--csv_file` is used for train-side data
+    - `--test_csv_file` is used as fixed test data
+    - when `--split_style three_way`, train-side data is split into train/val and test comes from `--test_csv_file`
+    - when `--split_style two_way`, train-side data is used as train and test comes from `--test_csv_file`
+- With `--val_csv_file` + `--test_csv_file` (three_way):
+        - `--csv_file` is used as train data
+        - `--val_csv_file` is used as validation data
+        - `--test_csv_file` is used as test data
+        - no split sampling is performed
+
+**Strict `--split_ratios` rules**
+
+- `--split_style three_way` + no `--test_csv_file`: **3 values required** (`train val test`)
+- `--split_style three_way` + `--test_csv_file`: **2 values required** (`train val`)
+- `--split_style three_way` + `--val_csv_file` + `--test_csv_file`: **ratios ignored**
+- `--split_style two_way` + no `--test_csv_file`: **2 values required** (`train test`)
+- `--split_style two_way` + `--test_csv_file`: **ratios ignored**
+
+**Examples with explicit split files**
+
+- three_way from separate files:
+    - `python ../scripts/prepare_data.py --csv_file train.csv --val_csv_file val.csv --test_csv_file test.csv --target_property Formation_Energy --split_style three_way`
+- two_way from separate files:
+    - `python ../scripts/prepare_data.py --csv_file train.csv --test_csv_file test.csv --target_property Formation_Energy --split_style two_way`
 
 
 

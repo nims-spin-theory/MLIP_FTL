@@ -834,7 +834,10 @@ class BaseTrainer(ABC):
         ) or (
             "mae" not in primary_metric
             and val_metrics[primary_metric]["metric"] > self.best_val_metric
-        ) or True:
+        ) or False:
+            print_str = f"New best {primary_metric}: {val_metrics[primary_metric]['metric']:.4f}, previous best: {self.best_val_metric:.4f}. Saving best checkpoint. "
+            logging.info(print_str)
+
             self.best_val_metric = val_metrics[primary_metric]["metric"]
             self.save(
                 metrics=val_metrics,

@@ -178,7 +178,7 @@ class BaseTask:
                 param.requires_grad = False
 
         for frozen_idx in range(frozen_layers):
-            prefix = f"backbone.blocks.{frozen_idx}"
+            prefix = f"backbone.blocks.{frozen_idx}."
             for name, param in self.trainer.model.named_parameters():
                 if prefix in name:
                     param.requires_grad = False
