@@ -1467,7 +1467,7 @@ def main():
                 print("\n" + "="*50)
                 print("FINAL CHECKPOINT EVALUATION")
                 print("="*50)
-                print("Evaluating the final checkpoint based on test set performance...\n")
+                print("Evaluating the final checkpoint using test set not seen in the training.\n")
 
                 final_eval_identifier = f"{args.job_name}_final_eval"
                 final_pred_cpdir = run_predict(
@@ -1515,8 +1515,8 @@ def main():
                 print("\n" + "="*50)
                 print("BEST CHECKPOINT EVALUATION")
                 print("="*50)
-                print("Dataset contains train/val/test sets. Selecting best checkpoint based on val set performance.")
-                print("Evaluating best checkpoint selected based on test set performance...\n")
+                print("Dataset contains train/val/test sets. Select a best checkpoint based on val set performance.")
+                print("Evaluating best checkpoint using test set not seen in the training.\n")
 
                 best_eval_identifier = f"{args.job_name}_best_eval"
                 best_pred_cpdir = run_predict(
