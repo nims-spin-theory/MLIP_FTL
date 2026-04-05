@@ -29,7 +29,12 @@ This approach is benchmarked on [Matbench](https://matbench.materialsproject.org
 > 1. More benchmark for this approach.
 > 2. More details on training flags and hands-on training tips.
 
-
+> ### 📓 Log
+> ##### 📃 2026-04-05: 
+>   Fixed a bug in the application flow for partially transfer-learned models.
+>   Added `three_way` and `two_way` dataset split options in training-data preparation.
+>   Added support for building train/val/test sets from separate CSV files.  
+ 
 
 ## Installation
 
