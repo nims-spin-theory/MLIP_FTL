@@ -30,6 +30,10 @@ This approach is benchmarked on [Matbench](https://matbench.materialsproject.org
 > 2. More details on training flags and hands-on training tips.
   
 > ### 📓 Log
+> ##### 📃 2026-05-10:
+>   1. Added timestamp to config file names to prevent naming conflicts when running multiple jobs simultaneously in the same directory.
+>   2. Modified apply mode to allow independent predictions without requiring the train set. Previously, the apply set folder had to be in the same location as training sets for proper config file reading. This restriction has been removed.
+>
 > ##### 📃 2026-04-05: 
 >   1. Fixed a bug in the application flow for partially transfer-learned models.
 >   2. Added `three_way` and `two_way` dataset split options in training-data preparation.
