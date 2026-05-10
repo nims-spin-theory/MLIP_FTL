@@ -62,12 +62,14 @@ import os
 import time
 import subprocess
 import shutil
+import tempfile
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import yaml
+import torch
 
 from fairchem.core.common.tutorial_utils import fairchem_main
 from fairchem.core.datasets import LmdbDataset
@@ -852,13 +854,12 @@ def run_predict(checkpoint_path, config_path, run_dir, job_name,
 
     # change to full TL mode for prediction to ensure all layers are used for inference
     config_yml['optim']['TL_mode'] = 'full'  
+    config_yml['optim']['scheduler'] = 'Null'
     if config_yml and 'TL_transfer_layers' in config_yml.get('optim', {}):
         del config_yml['optim']['TL_transfer_layers']
-    # change dataset.test.src if lmdb_override is provided
+    # patch the prediction dataset path without assuming a nested train/val/test layout
     if lmdb_override is not None:
-        config_yml["dataset"]["test"]["src"] = lmdb_override
-        config_yml["dataset"]["train"]["src"] = lmdb_override
-        config_yml["dataset"]["val"]["src"] = lmdb_override
+        config_yml = patch_apply_config_for_lmdb(config_yml, lmdb_override)
     with open(patched_config, "w") as f:
         yaml.safe_dump(config_yml, f, sort_keys=False)
     effective_config = patched_config
@@ -946,6 +947,79 @@ def run_predict(checkpoint_path, config_path, run_dir, job_name,
         return None
 
 
+def load_apply_config_from_checkpoint(checkpoint_path):
+    """Load the prediction config from a checkpoint, with legacy fallback."""
+    fallback_config_path = checkpoint_path.replace("best_checkpoint.pt", "config.yml")
+    fallback_config_path = fallback_config_path.replace("checkpoint.pt", "config.yml")
+
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        config_yml = checkpoint.get("config")
+        if config_yml is not None:
+            return config_yml
+    except Exception:
+        pass
+
+    if not os.path.exists(fallback_config_path):
+        raise FileNotFoundError(
+            "No embedded config found in checkpoint and no config.yml is found: "
+            f"{fallback_config_path}"
+        )
+
+    with open(fallback_config_path) as f:
+        return yaml.safe_load(f)
+
+
+def get_target_property_from_config(config_yml):
+    """Extract the original property name from a FairChem config."""
+    dataset_config = config_yml.get("dataset", {})
+    if isinstance(dataset_config, dict):
+        for section_name in ("train", "test", "val"):
+            section = dataset_config.get(section_name)
+            if isinstance(section, dict) and section.get("key_mapping"):
+                return list(section["key_mapping"].keys())[0]
+        if dataset_config.get("key_mapping"):
+            return list(dataset_config["key_mapping"].keys())[0]
+
+    raise KeyError("Could not determine target property from config dataset key_mapping")
+
+
+def patch_apply_config_for_lmdb(config_yml, lmdb_override):
+    """Return a config copy patched to point prediction datasets at the apply LMDB."""
+    patched_config = yaml.safe_load(yaml.safe_dump(config_yml, sort_keys=False))
+    dataset_config = patched_config.get("dataset", {})
+
+    if isinstance(dataset_config, dict) and any(
+        key in dataset_config for key in ("train", "val", "test")
+    ):
+        for section_name in ("train", "val", "test"):
+            section = dataset_config.get(section_name)
+            if isinstance(section, dict):
+                section["src"] = lmdb_override
+    elif isinstance(dataset_config, dict):
+        train_dataset = yaml.safe_load(yaml.safe_dump(dataset_config, sort_keys=False))
+        val_dataset = patched_config.get("val_dataset") or yaml.safe_load(
+            yaml.safe_dump(dataset_config, sort_keys=False)
+        )
+        test_dataset = patched_config.get("test_dataset") or yaml.safe_load(
+            yaml.safe_dump(dataset_config, sort_keys=False)
+        )
+        patched_config["dataset"] = {
+            "train": train_dataset,
+            "val": val_dataset,
+            "test": test_dataset,
+        }
+        dataset_config = patched_config["dataset"]
+        for section_name in ("train", "val", "test"):
+            section = dataset_config.get(section_name)
+            if isinstance(section, dict):
+                section["src"] = lmdb_override
+        patched_config.pop("val_dataset", None)
+        patched_config.pop("test_dataset", None)
+
+    return patched_config
+
+
 def run_application(checkpoint_path, lmdb_path, run_dir, job_name, gpu_id=0,
                     print_every=50, cpu_only=False, num_gpus=1):
     """
@@ -965,28 +1039,37 @@ def run_application(checkpoint_path, lmdb_path, run_dir, job_name, gpu_id=0,
         str | None: Path to checkpoint directory if successful, else None.
     """
     print(f"Running application with checkpoint: {checkpoint_path}")
-    config_path = checkpoint_path.replace("best_checkpoint.pt", "config.yml")
-    config_path = config_path.replace("checkpoint.pt", "config.yml")
-    
-    # Display target property name before launch
-    with open(config_path) as f:
-        config_yml = yaml.safe_load(f)
-    target = list(config_yml["dataset"]["train"]["key_mapping"].keys())[0]
+    config_yml = load_apply_config_from_checkpoint(checkpoint_path)
+    target = get_target_property_from_config(config_yml)
     print(f"Starting prediction for: {target}")
 
-    cpdir = run_predict(
-        checkpoint_path=checkpoint_path,
-        config_path=config_path,
-        run_dir=run_dir,
-        job_name=job_name,
-        lmdb_override=lmdb_path,
-        log_prefix="apply",
-        gpu_id=gpu_id,
-        print_every=print_every,
-        cpu_only=cpu_only,
-        num_gpus=num_gpus,
-        copy_artifacts=True,
-    )
+    temp_config = tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False)
+    try:
+        yaml.safe_dump(
+            patch_apply_config_for_lmdb(config_yml, lmdb_path),
+            temp_config,
+            sort_keys=False,
+        )
+        temp_config.close()
+
+        cpdir = run_predict(
+            checkpoint_path=checkpoint_path,
+            config_path=temp_config.name,
+            run_dir=run_dir,
+            job_name=job_name,
+            lmdb_override=lmdb_path,
+            log_prefix="apply",
+            gpu_id=gpu_id,
+            print_every=print_every,
+            cpu_only=cpu_only,
+            num_gpus=num_gpus,
+            copy_artifacts=True,
+        )
+    finally:
+        try:
+            os.unlink(temp_config.name)
+        except OSError:
+            pass
 
     if cpdir is not None:
         print(f"The model used: ")
@@ -1596,13 +1679,16 @@ def main():
         print("PREDICTION PHASE")
         print("="*50)
 
-        # get target name 
-        config_path     = args.model_path.replace("best_checkpoint.pt", "config.yml")
-        config_path     = config_path.replace("checkpoint.pt", "config.yml")
+        if args.model_path is None:
+            print("Error: --model_path is required for apply mode.")
+            return
+        if not os.path.isfile(args.model_path):
+            print(f"Error: Checkpoint file not found: {args.model_path}")
+            return
 
-        with open(config_path) as f:
-            config_yml = yaml.safe_load(f)
-            target_property = list(config_yml["dataset"]["train"]["key_mapping"].keys())[0]
+        # get target name from checkpoint metadata, with legacy config fallback
+        config_yml = load_apply_config_from_checkpoint(args.model_path)
+        target_property = get_target_property_from_config(config_yml)
 
         # replace \ and space by _
         target_property_string = target_property.replace(' ','_').replace('/','_')

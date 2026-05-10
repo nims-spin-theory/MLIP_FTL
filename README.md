@@ -23,16 +23,18 @@ This approach is benchmarked on [Matbench](https://matbench.materialsproject.org
 - **Forked from FairChem v1**: This repository is a modified fork of FairChem v1, based on commit `d4dd224a0c2fdfab6bab550f6cc6463a9c29d48d`.
   
 > ### 🚧 Development Update
-> The current version is already good to use. We are also actively adding new features to make it better, so please check back soon.
+> The current version is ready to use. We are actively working to improve it by adding new features and addressing bugs and usability issues. Please open an issue or contact us if you encounter any problems or have suggestions.
 >
 > Coming up next:
 > 1. More benchmark for this approach.
 > 2. More details on training flags and hands-on training tips.
+> 3. Further improvements to usability and functionality.
   
 > ### 📓 Log
 > ##### 📃 2026-05-10:
 >   1. Added timestamp to config file names to prevent naming conflicts when running multiple jobs simultaneously in the same directory.
->   2. Modified apply mode to allow independent predictions without requiring the train set. Previously, the apply set folder had to be in the same location as training sets for proper config file reading. This restriction has been removed.
+>   2. Modified apply mode to read configuration directly from the checkpoint file. A separate config file is no longer required; only the checkpoint file is needed for predictions, simplifying model usage and sharing.
+>   3. Fixed a bug that the apply set was required to reside in the same directory as the training sets.
 >
 > ##### 📃 2026-04-05: 
 >   1. Fixed a bug in the application flow for partially transfer-learned models.
