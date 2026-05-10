@@ -845,7 +845,7 @@ def run_predict(checkpoint_path, config_path, run_dir, job_name,
     warn_file = f"warn_{log_prefix}_{job_name}_{timestamp}.txt"
 
 
-    patched_config = f"config_{log_prefix}.yml"
+    patched_config = f"config_{log_prefix}_{timestamp}.yml"
     shutil.copy(config_path, patched_config)
     with open(patched_config) as f:
         config_yml = yaml.safe_load(f)
@@ -857,6 +857,8 @@ def run_predict(checkpoint_path, config_path, run_dir, job_name,
     # change dataset.test.src if lmdb_override is provided
     if lmdb_override is not None:
         config_yml["dataset"]["test"]["src"] = lmdb_override
+        config_yml["dataset"]["train"]["src"] = lmdb_override
+        config_yml["dataset"]["val"]["src"] = lmdb_override
     with open(patched_config, "w") as f:
         yaml.safe_dump(config_yml, f, sort_keys=False)
     effective_config = patched_config
@@ -1351,34 +1353,35 @@ def main():
             print(f"Updated batch size to: {args.batch_size}")
         
         # Generate configuration file (always done, even for dryrun)
+        config_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if args.transfer_learning:
             if args.tl_mode == 'partial':
                 if args.transfer_layers is not None and args.frozen_layers is not None:
                     config_filename = (
                         f"config_{target_property_string}_MPL{args.num_layers}"
-                        f"_TL{args.transfer_layers}_FL{args.frozen_layers}.yml"
+                        f"_TL{args.transfer_layers}_FL{args.frozen_layers}_{config_timestamp}.yml"
                     )
                 elif args.transfer_layers is not None:
                     config_filename = (
                         f"config_{target_property_string}_MPL{args.num_layers}"
-                        f"_TL{args.transfer_layers}.yml"
+                        f"_TL{args.transfer_layers}_{config_timestamp}.yml"
                     )
                 else:
                     config_filename = (
-                        f"config_{target_property_string}_MPL{args.num_layers}_TL.yml"
+                        f"config_{target_property_string}_MPL{args.num_layers}_TL_{config_timestamp}.yml"
                     )
             elif args.frozen_layers is None:
                 config_filename = (
-                    f"config_{target_property_string}_MPL{args.num_layers}_TL.yml"
+                    f"config_{target_property_string}_MPL{args.num_layers}_TL_{config_timestamp}.yml"
                 )
             else:
                 config_filename = (
                     f"config_{target_property_string}_MPL{args.num_layers}"
-                    f"_TL_FL{args.frozen_layers}.yml"
+                    f"_TL_FL{args.frozen_layers}_{config_timestamp}.yml"
                 )
         else:
             config_filename = (
-                f"config_{target_property_string}_MPL{args.num_layers}.yml"
+                f"config_{target_property_string}_MPL{args.num_layers}_{config_timestamp}.yml"
             )
         
         config_path = config_filename
