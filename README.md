@@ -31,6 +31,9 @@ This approach is benchmarked on [Matbench](https://matbench.materialsproject.org
 > 3. Further improvements to usability and functionality.
   
 > ### 📓 Log
+> ##### 📃 2026-05-18:
+>   1. Added a brief note on eSEN-30M-OAM good transfer-learning settings in the README.
+> 
 > ##### 📃 2026-05-10:
 >   1. Added timestamp to config file names to prevent naming conflicts when running multiple jobs simultaneously in the same directory.
 >   2. Modified apply mode to read configuration directly from the checkpoint file. A separate config file is no longer required; only the checkpoint file is needed for predictions, simplifying model usage and sharing.
@@ -336,16 +339,18 @@ python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
 #### 4. Transfer Learning: MLIP → Critical Temperature
   
 **Prerequisites**: This example requires the OMAT24 `eSEN-30M-OAM` MLIP model. Please download `esen_30m_oam.pt` from the [OMAT24 Hugging Face repository](https://huggingface.co/facebook/OMAT24 ) and place it in the examples folder before proceeding. 
-  
+
+Since property datasets are often small, although `eSEN-30M-OAM` has 10 layers, in practice, transferring 5 or 6 layers to a new model and freezing 3 layers usually gives good performance.
+
 ```bash
 python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
                 --material_id  UUID \
                 --target_property "Tc (K)(KKR-FULL)" \
-                --num_layers 10 --max_epochs 100 \
+                --num_layers 5 --max_epochs 100 \
                 --transfer_learning \
                 --tl_mode partial \
-                --transfer_layers 10 \
-                --frozen_layers    7 \
+                --transfer_layers 5 \
+                --frozen_layers   3 \
                 --base_model "./esen_30m_oam.pt"
 ```
   
