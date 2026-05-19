@@ -13,8 +13,18 @@ This implementation and its applications are detailed in our research paper: [np
     <img src="./benchmark/matbench_mean_mae_mad.png" alt="Critical temperature performance" width="1500">
 </p>
   
-This approach is benchmarked on [Matbench](https://matbench.materialsproject.org/ ). Matbench provides predefined splits, so all model performance is evaluated using a consistent split. In the figure above, the model has 10 message passing layers; all 10 are transferred from the eSEN-30M-OAM MLIP, and the top 7 layers are frozen during training (except for perovskites, where 5 layers are frozen).
-  
+The in-distribution performance of this approach is benchmarked on [Matbench](https://matbench.materialsproject.org/ ). Matbench provides predefined splits, so all model performance is evaluated using a consistent split. In the figure above, the model has 10 message passing layers; all 10 are transferred from the eSEN-30M-OAM MLIP, and the top 7 layers are frozen during training (except for perovskites, where 5 layers are frozen).
+
+<p align="center">
+    <img src="./benchmark/benchmark_LOPO_LOGO_eform.png" alt="Critical temperature performance" width="1500">
+</p>
+
+<p align="center">
+    <img src="./benchmark/benchmark_LOPO_LOGO_bandgap.png" alt="Critical temperature performance" width="1500">
+</p>
+
+The out-of-distribution performance of this approach is benchmarked using leave-one-period-out (LOPO) and leave-one-group-out (LOGO) tests. The database is a [snapshot of JARVIS](https://zenodo.org/records/8200972). To keep the training set size consistent, each case uses a 30,000-compound training set. For comparison, we include MatMiner+RF and MatMiner+XGB baselines. The [MatMiner](https://hackingmaterials.lbl.gov/matminer/) features are also obtained from the same [snapshot of JARVIS](https://zenodo.org/records/8200972). In the formation energy benchmark, we additionally include results from [Communications Materials volume 6:9 (2025)](https://www.nature.com/articles/s43246-024-00731-w#data-availability), which is based on a snapshot of the Materials Project. In the figure above, scratch-eSEN denotes a 3-layer model trained from scratch, whereas TL-eSEN denotes a 6-layer model in which the first 3 layers are transferred from the eSEN-30M-OAM MLIP and kept frozen during training.
+
 ### Key Features
   
 - **Training and Inference Interface**: A command line interface (CLI) to prepare train/val/test datasets, train regression models, evaluate performance, and run inference (prediction) from CSV inputs.
@@ -32,7 +42,8 @@ This approach is benchmarked on [Matbench](https://matbench.materialsproject.org
   
 > ### 📓 Log
 > ##### 📃 2026-05-20:
->   1. "Fixed an LMDB reopen error that occasionally occurred with the two_way split during training initialization."
+>   1. Fixed an LMDB reopen error that occasionally occurred with the two_way split during training initialization.
+>   2. Added out-of-distribution benchmarks for formation energy and band gap using leave-one-period-out and leave-one-group-out tests.
 > 
 > ##### 📃 2026-05-18:
 >   1. Added a brief note on eSEN-30M-OAM good transfer-learning settings in the README.
