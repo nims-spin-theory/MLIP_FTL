@@ -37,6 +37,12 @@ T_co = TypeVar("T_co", covariant=True)
 class LmdbDataset(BaseDataset):
     sharded: bool
 
+    # Process-level cache: path -> (lmdb.Environment, refcount)
+    # Allows two dataset instances (e.g. val + test) to share the same
+    # lmdb.Environment when they point to the same file, avoiding the
+    # "already open in this process" error.
+    _env_cache: dict[str, tuple[lmdb.Environment, int]] = {}
+
     r"""Dataset class to load from LMDB files containing relaxation
     trajectories or single point computations.
     Useful for Structure to Energy & Force (S2EF), Initial State to
@@ -153,8 +159,13 @@ class LmdbDataset(BaseDataset):
         return data_object
 
     def connect_db(self, lmdb_path: Path | None = None) -> lmdb.Environment:
-        return lmdb.open(
-            str(lmdb_path),
+        key = str(lmdb_path)
+        if key in LmdbDataset._env_cache:
+            env, refcount = LmdbDataset._env_cache[key]
+            LmdbDataset._env_cache[key] = (env, refcount + 1)
+            return env
+        env = lmdb.open(
+            key,
             subdir=False,
             readonly=True,
             lock=False,
@@ -162,13 +173,26 @@ class LmdbDataset(BaseDataset):
             meminit=False,
             max_readers=1,
         )
+        LmdbDataset._env_cache[key] = (env, 1)
+        return env
+
+    def _close_db(self, lmdb_path: Path) -> None:
+        key = str(lmdb_path)
+        if key not in LmdbDataset._env_cache:
+            return
+        env, refcount = LmdbDataset._env_cache[key]
+        if refcount <= 1:
+            env.close()
+            del LmdbDataset._env_cache[key]
+        else:
+            LmdbDataset._env_cache[key] = (env, refcount - 1)
 
     def __del__(self):
         if not self.path.is_file():
-            for env in self.envs:
-                env.close()
+            for db_path in sorted(self.path.glob("*.lmdb")):
+                self._close_db(db_path)
         else:
-            self.env.close()
+            self._close_db(self.path)
 
 
 def data_list_collater(

@@ -31,6 +31,9 @@ This approach is benchmarked on [Matbench](https://matbench.materialsproject.org
 > 3. Further improvements to usability and functionality.
   
 > ### 📓 Log
+> ##### 📃 2026-05-20:
+>   1. "Fixed an LMDB reopen error that occasionally occurred with the two_way split during training initialization."
+> 
 > ##### 📃 2026-05-18:
 >   1. Added a brief note on eSEN-30M-OAM good transfer-learning settings in the README.
 > 
@@ -159,8 +162,8 @@ The target property and material ID column names are arbitrary and should match 
   
 This will generate a folder that contains the train/val/test dataset for model training and performance evaluation in the next step. In this example, the folder name is `set_formation_energy_(eV_atom)_train`. The output directory can be set using the `--output_dir` flag. Distribution plots are also included in this folder.
   
-Please check appendix at end for more information. For complete information on available parameters, run `python prepare_data.py -h`.
-  
+The train/val/test sets can also be built from separate and specific CSV files; see Appendix A for details.
+
 #### 2. Training Formation Energy Model from Scratch
   
 **Single GPU training**
@@ -340,7 +343,7 @@ python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
   
 **Prerequisites**: This example requires the OMAT24 `eSEN-30M-OAM` MLIP model. Please download `esen_30m_oam.pt` from the [OMAT24 Hugging Face repository](https://huggingface.co/facebook/OMAT24 ) and place it in the examples folder before proceeding. 
 
-Since property datasets are often small, although `eSEN-30M-OAM` has 10 layers, in practice, transferring 5 or 6 layers to a new model and freezing 3 layers usually gives good performance.
+Since property datasets are often small, although `eSEN-30M-OAM` has 10 layers, in practice, transferring 5 layers to construct a new model of 5 layers and freezing 3 layers usually gives good performance.
 
 ```bash
 python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
