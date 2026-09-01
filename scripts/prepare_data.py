@@ -106,12 +106,13 @@ def symmetrize_structure(structure, symprec=0.001):
         return structure, None
 
 
-def get_structure(system):
+def get_structure(system, symmetrize=False):
     """
     Convert pandas Series row to pymatgen Structure object.
     
     Args:
         system (pd.Series): One compound row from dataframe
+        symmetrize (bool): Reduce to primitive cell via spglib
         
     Returns:
         Structure: pymatgen Structure object
@@ -122,7 +123,8 @@ def get_structure(system):
     
     lattice = Lattice(cell)
     structure = Structure(lattice, atom, posi)
-    structure, _ = symmetrize_structure(structure)
+    if symmetrize:
+        structure, _ = symmetrize_structure(structure)
 
     return structure
 
@@ -453,7 +455,7 @@ def validate_lmdb_database(lmdb_path, max_samples_to_check=10):
         return False
 
 
-def db_to_atomslist(compounds_df, material_id_col, properties,  dir_poscar=None, ):
+def db_to_atomslist(compounds_df, material_id_col, properties,  dir_poscar=None, symmetrize=False):
     """
     Convert pandas DataFrame to list of ASE atoms objects.
     
@@ -463,6 +465,7 @@ def db_to_atomslist(compounds_df, material_id_col, properties,  dir_poscar=None,
                           if None, structures are read from the csv file
                           defined by "cell", "positions", and "numbers"
         properties (dict): Property names mapping
+        symmetrize (bool): Reduce structures to primitive cells via spglib
         
     Returns:
         list: List of ASE atoms objects with attached properties
@@ -503,7 +506,7 @@ def db_to_atomslist(compounds_df, material_id_col, properties,  dir_poscar=None,
                     continue
             # read structure within the csv file stored as "cell", "positions", and "numbers"
             else:
-                struc = get_structure(compounds_df.loc[i])  # convert row to pymatgen structure format
+                struc = get_structure(compounds_df.loc[i], symmetrize=symmetrize)  # convert row to pymatgen structure format
                 atoms = AseAtomsAdaptor.get_atoms(struc)    # convert to ASE atoms format
             
             # Validate structure
@@ -705,6 +708,12 @@ def parse_args():
         help='Prepare the data for prediction application, ie no split'
     )
     
+    parser.add_argument(
+        '--symmetrize',
+        action='store_true',
+        help='Reduce structures to primitive cells via spglib (default: off)'
+    )
+    
     return parser.parse_args()
 
 
@@ -863,7 +872,8 @@ def main():
 
     print("\nConverting to atoms list...")
     atoms_list = db_to_atomslist(compounds_df, dir_poscar=args.poscar_dir, 
-                                 properties=properties, material_id_col=args.material_id)
+                                 properties=properties, material_id_col=args.material_id,
+                                 symmetrize=args.symmetrize)
     print(f"Successfully converted {len(atoms_list)} structures")
     
     if len(atoms_list) == 0:
@@ -874,7 +884,8 @@ def main():
     if test_df is not None:
         print("\nConverting fixed test CSV to atoms list...")
         test_atoms_list = db_to_atomslist(test_df, dir_poscar=args.poscar_dir,
-                                          properties=properties, material_id_col=args.material_id)
+                                          properties=properties, material_id_col=args.material_id,
+                                          symmetrize=args.symmetrize)
         print(f"Successfully converted {len(test_atoms_list)} fixed test structures")
         if len(test_atoms_list) == 0:
             print("No structures were loaded from test_csv_file. Check your data paths.")
@@ -884,7 +895,8 @@ def main():
     if val_df is not None:
         print("\nConverting fixed validation CSV to atoms list...")
         val_atoms_list = db_to_atomslist(val_df, dir_poscar=args.poscar_dir,
-                                         properties=properties, material_id_col=args.material_id)
+                                         properties=properties, material_id_col=args.material_id,
+                                         symmetrize=args.symmetrize)
         print(f"Successfully converted {len(val_atoms_list)} fixed validation structures")
         if len(val_atoms_list) == 0:
             print("No structures were loaded from val_csv_file. Check your data paths.")
