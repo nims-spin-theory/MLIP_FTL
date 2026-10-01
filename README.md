@@ -41,6 +41,12 @@ The out-of-distribution performance of this approach is benchmarked using leave-
 > 3. Further improvements to usability and functionality.
   
 > ### 📓 Log
+> ##### 📃 2026-10-01:
+>   1. Simplified installation: added a one-step `install.sh` (GPU by default, `--cpu` option) and `scripts/check_install.py` to verify the setup.
+>   2. Fixed DDP training with frozen layers: `find_unused_parameters` is now set automatically inside MLIP_FTL, so manually editing PyTorch's `distributed.py` is no longer needed.
+>   3. Restructured the installation guide around a single tested configuration (Python 3.9 / PyTorch 2.4.1 / cu124), with other setups under "Advanced Installation".
+>   4. Added `examples_scripts/clean_examples.sh` to remove generated files from the examples folder so the examples can be redone from scratch.
+>
 > ##### 📃 2026-05-20:
 >   1. Fixed an LMDB reopen error that occasionally occurred with the two_way split during training initialization.
 >   2. Added out-of-distribution benchmarks for formation energy and band gap using leave-one-period-out and leave-one-group-out tests.
@@ -68,65 +74,62 @@ Before getting started, please ensure you have the following installed:
   
 - **[Miniconda](https://docs.conda.io/en/latest/miniconda.html )** - For environment management
   
-### Clone Repo
+### Quick Installation (Recommended)
   
-1. **Clone the repository**:
+The officially tested configuration is:
+  
+| | |
+|---|---|
+| OS | Linux x86_64 |
+| Python | 3.9 |
+| PyTorch | 2.4.1 |
+| CUDA build | cu124 (CUDA 12.4) |
+  
+If your NVIDIA driver supports CUDA 12.4, use the commands below exactly as written:
   
 ```bash
-git clone git@github.com:nims-spin-theory/MLIP_FTL.git
+git clone https://github.com/nims-spin-theory/MLIP_FTL.git
 cd MLIP_FTL
-```
   
-2. **Set up the environment**:
-  
-```bash
 # Create and activate the conda environment
 # Always activate the environment before use
-conda create -n MLIP_FTL python=3.9
+conda create -n MLIP_FTL python=3.9 -y
 conda activate MLIP_FTL
+  
+bash install.sh
 ```
   
-### GPU Installation (Recommended)
-  
-**Important Note**: This guide assumes CUDA 12.4. If you're using a different CUDA version, please check your version with `nvcc --version` and modify the installation URLs accordingly. Visit the [PyTorch Geometric installation page](https://data.pyg.org/whl/ ) for compatible combinations.
+For machines without an NVIDIA GPU, or for testing purposes:
   
 ```bash
-# Load CUDA module if managed by your system (optional)
-module load cuda/12.4  # Only needed if CUDA is managed by environment modules
-  
-# Install PyTorch with CUDA support
-# cu124 at the end due to CUDA 12.4 version
-pip install torch==2.4.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-  
-# Install FairChem in development mode
-pip install -e packages/fairchem-core[dev]
-  
-# Install additional PyTorch dependencies
-# cu124 at the end due to CUDA 12.4 version
-pip install torch-scatter torch-sparse torch-spline-conv -f https://data.pyg.org/whl/torch-2.4.1+cu124.html
-pip install torch-cluster torch_geometric -f https://data.pyg.org/whl/torch-2.4.1+cu124.html
-  
-# Install additional dependencies
-pip install ase_db_backends seaborn scikit-learn
+bash install.sh --cpu
 ```
   
-### CPU-Only Installation
+The installer sets up PyTorch, the matching PyTorch Geometric wheels, the bundled
+(modified) FairChem, and all other dependencies, then verifies the installation:
   
-For systems without GPU support or for testing purposes:
+```
+✓ PyTorch imported
+✓ CUDA available
+✓ PyG imported
+✓ FairChem imported
+✓ MLIP_FTL ready
+```
+  
+You can re-run this check at any time with `python scripts/check_install.py`
+(add `--cpu` for CPU-only installs).
+  
+If the tested configuration does not fit your system (e.g. `install.sh` fails or
+your driver does not support CUDA 12.4), see
+[Appendix B: Advanced Installation](#appendix-b-advanced-installation-other-cudapytorch-configurations).
+  
+### Developer Installation
+  
+Contributors who want to run the test suite and linters should additionally
+install the development extras:
   
 ```bash
-# Install PyTorch CPU version
-pip install torch==2.4.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-  
-# Install FairChem in development mode
-pip install -e packages/fairchem-core[dev]
-  
-# Install additional PyTorch dependencies (CPU versions)
-pip install torch-scatter torch-sparse torch-spline-conv -f https://data.pyg.org/whl/torch-2.4.1+cpu.html
-pip install torch-cluster torch_geometric -f https://data.pyg.org/whl/torch-2.4.1+cpu.html
-  
-# Install additional dependencies
-pip install ase_db_backends
+pip install -e "packages/fairchem-core[dev]"
 ```
   
   
@@ -379,57 +382,18 @@ python ../scripts/MLIP_FTL.py --data_dir "set_Tc_(K)(KKR-FULL)_train" \
   
 #### DistributedDataParallel Error with Frozen Transfer Learning
   
-When using frozen transfer learning, you may encounter the following error:
+When using frozen transfer learning with multiple GPUs, older versions of this
+repository could fail with:
   
 ```bash
-[rank0]: RuntimeError: Expected to have finished reduction in the prior iteration before starting a new one. This error indicates that your module has parameters that were not used in producing loss. You can enable unused parameter detection by passing the keyword argument `find_unused_parameters=True` to `torch.nn.parallel.DistributedDataParallel`, and by
-[rank0]: making sure all `forward` function outputs participate in calculating loss.
-[rank0]: If you already have done the above, then the distributed data parallel module wasn't able to locate the output tensors in the return value of your module's `forward` function. Please include the loss function and the structure of the return value of `forward` of your module when reporting this issue (e.g. list, dict, iterable).
-[rank0]: Parameter indices which did not receive grad for rank 0: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40
-[rank0]: In addition, you can set the environment variable TORCH_DISTRIBUTED_DEBUG to either INFO or DETAIL to print out information about which particular parameters did not receive gradient on this rank as part of this error
+[rank0]: RuntimeError: Expected to have finished reduction in the prior iteration before starting a new one. This error indicates that your module has parameters that were not used in producing loss. ...
 ```
   
-**Solution**: This error occurs because frozen layers don't participate in gradient computation, causing PyTorch's distributed training to fail. Here's how to fix it:
-  
-1. **Locate the PyTorch distributed.py file**:
-  
-   The file is located at:
-  
-   ```bash
-   ~/miniconda3/envs/{conda_env_name}/lib/python3.9/site-packages/torch/nn/parallel/distributed.py
-   ```
-  
-   For example, if using the `MLIP_FTL` environment from our installation guide:
-  
-   ```bash
-   ~/miniconda3/envs/MLIP_FTL/lib/python3.9/site-packages/torch/nn/parallel/distributed.py
-   ```
-  
-2. **Edit the DistributedDataParallel class in distributed.py file** (around line 637):
-  
-   Change `find_unused_parameters=False` to `find_unused_parameters=True` like this:
-  
-   ```python
-   def __init__(
-       self,
-       module,
-       device_ids=None,
-       output_device=None,
-       dim=0,
-       broadcast_buffers=True,
-       process_group=None,
-       bucket_cap_mb=None,
-       find_unused_parameters=True,  # Change from False to True
-       check_reduction=False,
-       gradient_as_bucket_view=False,
-       static_graph=False,
-       delay_all_reduce_named_params=None,
-       param_to_hook_all_reduce=None,
-       mixed_precision: Optional[_MixedPrecision] = None,
-       device_mesh=None,
-   ):
-   ```
-  This should fix the problem. Please try training again. 
+This is now handled automatically: when frozen layers are used (`--frozen_layers`),
+MLIP_FTL enables `find_unused_parameters=True` on `DistributedDataParallel`
+internally. No modification of PyTorch is needed. If you still need to override
+this behavior, set `ddp_find_unused_parameters: true/false` under `optim` in the
+generated YAML config.
 
 
 #### MemoryError or KeyError in Warn File
@@ -539,6 +503,75 @@ The `prepare_data.py` script supports two split styles and can specify csv files
     - `python ../scripts/prepare_data.py --csv_file train.csv --val_csv_file val.csv --test_csv_file test.csv --target_property Formation_Energy --split_style three_way`
 - two_way from separate files:
     - `python ../scripts/prepare_data.py --csv_file train.csv --test_csv_file test.csv --target_property Formation_Energy --split_style two_way`
+  
+  
+## Appendix B: Advanced Installation (Other CUDA/PyTorch Configurations)
+  
+Only needed if the tested configuration in the Installation section does not fit
+your system (e.g. `install.sh` fails or your driver does not support CUDA 12.4).
+Determine the two values below, then run the commands that follow with `cu124`
+replaced accordingly.
+  
+**1. The PyTorch version**: keep `2.4.x` (e.g. `2.4.1`). The bundled FairChem is
+a modified fork of upstream `fairchem-core` 1.10.0, whose dependencies are
+unchanged: upstream declares `torch~=2.4.0` (i.e. `>=2.4.0, <2.5.0`), so only the
+PyTorch 2.4 family were tested. Newer PyTorch (2.5+) might not work. If PyTorch is already installed, check it
+with:
+  
+```bash
+python -c "import torch; print(torch.__version__)"   # e.g. 2.4.1+cu124
+```
+  
+**2. The CUDA build** (`cu124`, `cu121`, `cu118`, or `cpu`): this is the CUDA
+version PyTorch is compiled against, **not** your system CUDA toolkit (`nvcc`).
+The only requirement is that your NVIDIA driver supports it. Check the maximum
+CUDA version your driver supports with:
+  
+```bash
+nvidia-smi   # e.g. "| NVIDIA-SMI 580.159.03   Driver Version: 580.159.03   CUDA Version: 13.0 |"
+```
+  
+The number after `CUDA Version:` in the header line is the highest CUDA version
+your driver supports. Pick the largest build that does not exceed this number:
+  
+| `CUDA Version:` shown | CUDA build to use |
+|---|---|
+| 12.4 or higher (e.g. 13.0) | `cu124` |
+| 12.1 – 12.3 | `cu121` |
+| 11.8 – 12.0 | `cu118` |
+| no NVIDIA GPU | `cpu` |
+  
+**3. The PyTorch Geometric wheels must match both values.** The wheel index URL
+encodes them as `torch-<version>+<cuda build>.html`; see the
+[PyTorch Geometric wheel index](https://data.pyg.org/whl/ ) for available
+combinations. For example, with torch `2.4.1` and `cu121`, use
+`https://data.pyg.org/whl/torch-2.4.1+cu121.html` and install torch with
+`--index-url https://download.pytorch.org/whl/cu121`:
+  
+```bash
+# Install PyTorch
+# CHANGE: replace "cu124" at the end of the index-url with your CUDA build
+#         (cu121, cu118, or cpu). The torch version stays 2.4.1.
+pip install torch==2.4.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+  
+# Install the bundled, modified FairChem
+# CHANGE: nothing
+pip install -e packages/fairchem-core
+  
+# Install PyTorch Geometric extensions
+# CHANGE: replace "cu124" in both wheel-index URLs with the SAME CUDA build
+#         chosen above, so it matches the installed torch (torch-2.4.1+<build>.html)
+pip install torch-scatter torch-sparse torch-spline-conv -f https://data.pyg.org/whl/torch-2.4.1+cu124.html
+pip install torch-cluster torch_geometric -f https://data.pyg.org/whl/torch-2.4.1+cu124.html
+  
+# Install additional dependencies
+# CHANGE: nothing
+pip install ase_db_backends seaborn scikit-learn
+  
+# Verify
+# CHANGE: add --cpu if you chose the cpu build
+python scripts/check_install.py
+```
   
   
   

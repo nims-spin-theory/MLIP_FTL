@@ -580,8 +580,16 @@ class BaseTrainer(ABC):
             self.logger.log_summary({"num_params": num_params})
 
         if distutils.initialized():
+            # Frozen layers (optim.FL) never produce gradients, so DDP must be
+            # told to expect unused parameters; overridable via
+            # optim.ddp_find_unused_parameters.
+            find_unused_parameters = self.config["optim"].get(
+                "ddp_find_unused_parameters",
+                self.config["optim"].get("FL") is not None,
+            )
             self.model = DistributedDataParallel(
                 self.model,
+                find_unused_parameters=find_unused_parameters,
             )
 
     @property
