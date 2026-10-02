@@ -2,6 +2,14 @@
 We want to make contributing to this project as easy and transparent as
 possible.
 
+## Developer Installation
+Contributors who want to run the test suite and linters should additionally
+install the development extras (after the normal installation in README.md):
+
+```bash
+pip install -e "packages/fairchem-core[dev]"
+```
+
 ## Pull Requests
 We actively welcome your pull requests.
 

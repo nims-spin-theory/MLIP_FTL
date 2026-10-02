@@ -123,16 +123,7 @@ If the tested configuration does not fit your system (e.g. `install.sh` fails or
 your driver does not support CUDA 12.4), see
 [Appendix B: Advanced Installation](#appendix-b-advanced-installation-other-cudapytorch-configurations).
   
-### Developer Installation
-  
-Contributors who want to run the test suite and linters should additionally
-install the development extras:
-  
-```bash
-pip install -e "packages/fairchem-core[dev]"
-```
-  
-  
+
 ## Usage
   
 This section shows three common workflows using our interface scripts in the `scripts` folder. These examples provide hands-on experience and can be adapted for your research needs. The example data is obtained from the [DXMag Computational HeuslerDB](https://www.nims.go.jp/group/spintheory/database/ ).
