@@ -563,7 +563,109 @@ pip install ase_db_backends seaborn scikit-learn
 # CHANGE: add --cpu if you chose the cpu build
 python scripts/check_install.py
 ```
-  
-  
-  
-  
+
+## Appendix C: Atomic Properties
+
+Models can predict either one scalar per structure (the default) or one scalar
+per atomic site. Each model predicts one selected property. Select
+`--property_level atom` during both preparation and training for site properties.
+Existing global-property commands and checkpoints keep their original behavior.
+
+The local target CSV column must contain a list of finite numbers, for example
+`"[2.0, -1.0, 0.0]"`, in exactly the same order as `numbers` and `positions`.
+There must be one label for every atom. Positions use fractional coordinates, as
+in the existing global workflow. Primitive-cell conversion (`--symmetrize`) is
+not supported in atom mode because it can change site count and ordering.
+
+For the supplied development dataset, run these commands from the repository root:
+
+```bash
+conda activate MLIP_FTL
+
+python scripts/prepare_data.py --csv_file dev_local_property/dev.csv \
+    --material_id material_id --target_property vasp_magmoms \
+    --property_level atom --split_ratios 0.8 0.1 0.1 \
+    --output_dir set_local_spins
+
+python scripts/MLIP_FTL.py --data_dir set_local_spins \
+    --material_id material_id --target_property vasp_magmoms \
+    --property_level atom --allow_global_sign_flip --loss mae \
+    --num_layers 5 --max_epochs 50 --output_dir result_local_spins
+```
+
+`--allow_global_sign_flip` treats a complete pattern and its reversal as
+equivalent: `[2, -1]` and `[-2, 1]` have zero alignment error. It never reverses
+individual atoms independently. Omit this flag for properties whose signs must
+match their labels. For example:
+
+```bash
+python scripts/prepare_data.py --csv_file charges.csv \
+    --material_id material_id --target_property local_charge --property_level atom \
+    --output_dir set_charges
+python scripts/MLIP_FTL.py --data_dir set_charges \
+    --material_id material_id --target_property local_charge --property_level atom
+```
+
+Both MAE and MSE losses are supported (`--loss mae` or `--loss mse`). The sign
+for each structure minimizes the chosen training loss; that same orientation is
+used for all evaluation metrics. Each structure contributes equally: first
+average errors over its atoms, then average over structures. Validation selects
+the best checkpoint using structure-weighted MAE. Reported RMSE is the square
+root of structure-weighted MSE; R² uses site weights of `1 / n_atoms` and is
+undefined when the reference values are constant.
+
+Automatic normalization uses training data only and weights each structure
+equally. Signed targets use mean and standard deviation. Sign-invariant targets
+use zero mean and root-mean-square magnitude, so label reversal does not change
+the statistics. `--disable_auto_normalize` uses identity normalization for local
+targets. Manual normalization requires both `--manual_mean` and
+`--manual_stdev`, with finite values and positive standard deviation. Sign
+alignment also supports a manual nonzero mean. `--head_reduce` applies only to
+global properties; atomic predictions are never pooled.
+
+Transfer learning uses the existing options. For example, add the following to
+the local training command to transfer three message-passing layers into a
+five-layer model and freeze the first two:
+
+```bash
+--transfer_learning --base_model examples_scripts/esen_30m_oam.pt \
+    --tl_mode partial --transfer_layers 3 --frozen_layers 2
+```
+
+Full transfer uses `--tl_mode full`. A global base model supplies compatible
+backbone weights; the local head and target normalization are initialized for
+the new property. Add `--cpu_only` for CPU execution or `--num_gpus 2` for two GPUs.
+
+Evaluation writes one CSV row per structure, with JSON lists in `<target> ML`
+and `<target> DFT`. For sign-invariant evaluation, `<target> ML aligned` and
+`alignment_sign` record the evaluation orientation while retaining the original
+model predictions. Lists include every atom, including fixed atoms. Standalone
+evaluation must use the same property level, sign setting, and loss as training:
+
+```bash
+python scripts/evaluate_result.py --lmdb_path set_local_spins/test.lmdb \
+    --pred_path path/to/ocp_predictions.npz \
+    --target_property vasp_magmoms --material_id material_id \
+    --property_level atom --allow_global_sign_flip --loss mae
+```
+
+For new compounds, prepare an unlabeled dataset and apply the trained checkpoint:
+
+```bash
+python scripts/prepare_data.py --csv_file new_compounds.csv \
+    --material_id material_id --property_level atom --apply \
+    --output_dir set_local_apply
+python scripts/MLIP_FTL.py --apply --model_path path/to/checkpoint.pt \
+    --lmdb_path set_local_apply/apply.lmdb --material_id material_id
+```
+
+Application reads the property mode, sign settings, and normalization from the
+checkpoint. It exports the original prediction orientation; either overall sign
+is valid for sign-invariant properties. A separate training YAML is unnecessary.
+
+This stage uses atomic species and structure as inputs. A deterministic
+structure-only scalar model cannot assign opposite moments to sites it sees as
+structurally indistinguishable, or select among magnetic states absent from its
+inputs. Global sign equivalence does not remove that limitation. Magnetic-state
+inputs, symmetry-breaking models, vector targets, multiple properties per model,
+partial site labels, and joint local/global supervision are future work.

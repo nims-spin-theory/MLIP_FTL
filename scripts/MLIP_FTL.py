@@ -74,6 +74,10 @@ import torch
 from fairchem.core.common.tutorial_utils import fairchem_main
 from fairchem.core.datasets import LmdbDataset
 from sklearn.metrics import r2_score, mean_absolute_error
+from fairchem.core.modules.local_property import (
+    collect_local_results, local_settings, normalization_statistics,
+    plot_local_performance,
+)
 
 # GPU detection and diagnostics
 def print_gpu_optimization_summary(args):
@@ -255,7 +259,8 @@ def optimize_batch_size(data_dir, max_batch_size=64, target_property="formation_
         return 8
 
 
-def collect_result(dft_path, prd_path, target, material_id, application=False):
+def collect_result(dft_path, prd_path, target, material_id, application=False,
+                   property_level='system', allow_global_sign_flip=False, loss='mae'):
     """
     Collect and organize DFT vs ML prediction results.
     
@@ -269,6 +274,9 @@ def collect_result(dft_path, prd_path, target, material_id, application=False):
     Returns:
         pd.DataFrame: DataFrame containing results with material IDs and predictions
     """
+    if property_level == 'atom':
+        return collect_local_results(dft_path, prd_path, target, material_id,
+                                     application, allow_global_sign_flip, loss)
     # Load DFT reference data
     dft_raw = LmdbDataset({"src": dft_path})
     
@@ -306,7 +314,8 @@ def collect_result(dft_path, prd_path, target, material_id, application=False):
     return df
 
 
-def calculate_normalization_stats(data_dir, target_property):
+def calculate_normalization_stats(data_dir, target_property, property_level='system',
+                                  allow_global_sign_flip=False):
     """
     Calculate mean and standard deviation for normalization from training data.
     
@@ -318,6 +327,19 @@ def calculate_normalization_stats(data_dir, target_property):
         tuple: (mean, stdev) for normalization
     """
     train_path = os.path.join(data_dir, 'train.lmdb')
+    if property_level == 'atom':
+        dataset = LmdbDataset({'src': train_path})
+        try:
+            values = []
+            for index in range(len(dataset)):
+                data = dataset[index]
+                value = np.asarray(data[target_property])
+                if value.shape != (int(data.natoms), 1):
+                    raise ValueError(f'Local target at training row {index} must have shape [n_atoms, 1]; prepare with --property_level atom')
+                values.append(value)
+            return normalization_statistics(values, allow_global_sign_flip)
+        finally:
+            del dataset
     
     if not os.path.exists(train_path):
         print(f"Warning: Training data not found at {train_path}")
@@ -404,7 +426,8 @@ def create_config_file(config_path, data_dir, target_property,
                        tl_mode='full', transfer_layers=None,
                        auto_normalize=True, cpu_only=False, num_gpus=1,
                        num_workers=4, pin_memory=False, manual_mean=None,
-                       manual_stdev=None, head_reduce='sum'):
+                       manual_stdev=None, head_reduce='sum', property_level='system',
+                       allow_global_sign_flip=False, loss='mae'):
     """
     Create comprehensive YAML configuration file for training.
     
@@ -429,8 +452,23 @@ def create_config_file(config_path, data_dir, target_property,
         manual_stdev (float): Manually specified stdev (overrides auto-calculation)
         head_reduce (str): Pooling reduction for energy heads ('sum' or 'mean')
     """
-    # Determine normalization statistics
-    if manual_mean is not None and manual_stdev is not None:
+    if allow_global_sign_flip and property_level != 'atom':
+        raise ValueError('Global sign equivalence requires --property_level atom')
+    if loss not in ('mae', 'mse'):
+        raise ValueError('Loss must be mae or mse')
+    # Preserve legacy scalar normalization defaults.
+    if property_level == 'atom':
+        if (manual_mean is None) != (manual_stdev is None):
+            raise ValueError('Specify both --manual_mean and --manual_stdev')
+        if manual_mean is not None:
+            mean, stdev = manual_mean, manual_stdev
+        elif auto_normalize:
+            mean, stdev = calculate_normalization_stats(data_dir, target_property, 'atom', allow_global_sign_flip)
+        else:
+            mean, stdev = 0.0, 1.0
+        if not np.isfinite(mean) or not np.isfinite(stdev) or stdev <= 0:
+            raise ValueError('Normalization requires finite mean and positive finite scale')
+    elif manual_mean is not None and manual_stdev is not None:
         # Use manually specified values
         mean, stdev = manual_mean, manual_stdev
         print(f"Using manually specified normalization values:")
@@ -576,6 +614,28 @@ def create_config_file(config_path, data_dir, target_property,
         'trainer': 'mlip_trainer'
     }
     
+    config['loss_functions'][0]['energy']['fn'] = loss
+    if property_level == 'atom':
+        for split in config['dataset'].values():
+            split['key_mapping'] = {target_property: 'local_property'}
+        config['dataset']['train']['transforms']['normalizer'] = {
+            'local_property': {'mean': mean, 'stdev': stdev}
+        }
+        config['model']['heads'] = {'local_property': {'module': 'esen_mlp_scalar_site_head'}}
+        config['outputs'] = {'local_property': {
+            'level': 'atom', 'property': 'local_property', 'shape': 1,
+            'allow_global_sign_flip': allow_global_sign_flip,
+            'train_on_free_atoms': False, 'eval_on_free_atoms': False,
+            'predict_on_free_atoms': False, 'prediction_dtype': 'float32',
+        }}
+        config['loss_functions'] = [{'local_property': {'fn': loss, 'coefficient': 10}}]
+        config['evaluation_metrics'] = {
+            'metrics': {'local_property': ['mae', 'rmse', 'r2']},
+            'primary_metric': 'local_property_mae',
+        }
+        config['trainer'] = 'mlip_local_property_trainer'
+        config['optim']['local_property_transfer'] = transfer_learning
+
     # Add transfer learning specific configuration
     if transfer_learning:
         config['optim']['TL_mode'] = tl_mode
@@ -629,6 +689,8 @@ def run_training(config_path, run_dir, job_name, base_model=None, gpu_id=0,
     ]
     if base_model is not None:
         cmd += ['--checkpoint', base_model]
+    if cpu_only:
+        cmd += ['--cpu']
     if num_gpus>1:
         cmd = ['torchrun', '--standalone', '--nnodes=1',  '--nproc_per_node=1', ] + cmd
         cmd += ['--num-gpus', str(num_gpus)]
@@ -720,7 +782,8 @@ def run_training(config_path, run_dir, job_name, base_model=None, gpu_id=0,
         return None
 
 
-def evaluate_model(cpdir, test_data_path, target_property, material_id, output_prefix):
+def evaluate_model(cpdir, test_data_path, target_property, material_id, output_prefix,
+                   property_level='system', allow_global_sign_flip=False, loss='mae'):
     """
     Evaluate trained model and generate performance metrics.
     
@@ -744,7 +807,8 @@ def evaluate_model(cpdir, test_data_path, target_property, material_id, output_p
     df = collect_result(test_data_path, prd_path, 
                         target=target_property, 
                         material_id=material_id,
-                        application=False)
+                        application=False, property_level=property_level,
+                        allow_global_sign_flip=allow_global_sign_flip, loss=loss)
     
     # Save results
     csv_output = f"{cpdir}/{output_prefix}_{target_property.replace(' ','_').replace('/','_')}.csv"
@@ -764,6 +828,9 @@ def plot_performance(df, target_property, output_prefix):
         output_prefix (str): Prefix for output files
     """
     dft_col = f'{target_property} DFT'
+    if len(df) and isinstance(df[dft_col].iloc[0], str) and df[dft_col].iloc[0].startswith('['):
+        output = f"{output_prefix}_{target_property.replace(' ', '_').replace('/', '_')}.png"
+        return plot_local_performance(df, target_property, output)
     ml_col = f'{target_property} ML'
     
     # Compute metrics
@@ -854,6 +921,8 @@ def run_predict(checkpoint_path, config_path, run_dir, job_name,
 
     # change to full TL mode for prediction to ensure all layers are used for inference
     config_yml['optim']['TL_mode'] = 'full'  
+    if 'local_property_transfer' in config_yml['optim']:
+        config_yml['optim']['local_property_transfer'] = False
     config_yml['optim']['scheduler'] = 'Null'
     if config_yml and 'TL_transfer_layers' in config_yml.get('optim', {}):
         del config_yml['optim']['TL_transfer_layers']
@@ -874,6 +943,8 @@ def run_predict(checkpoint_path, config_path, run_dir, job_name,
         '--print-every', str(print_every),
         '--checkpoint', checkpoint_path,
     ]
+    if cpu_only:
+        cmd += ['--cpu']
     if num_gpus > 1:
         cmd = ['torchrun', '--standalone', '--nnodes=1', '--nproc_per_node=1'] + cmd
         cmd += ['--num-gpus', str(num_gpus)]
@@ -1298,12 +1369,22 @@ def parse_args():
 
 
 
-    return parser.parse_args()
+    parser.add_argument('--property_level', choices=['system', 'atom'], default='system')
+    parser.add_argument('--allow_global_sign_flip', action='store_true',
+                        help='Treat reversal of all site signs within a structure as equivalent')
+    parser.add_argument('--loss', choices=['mae', 'mse'], default='mae')
+    args = parser.parse_args()
+    if not args.apply and args.allow_global_sign_flip and args.property_level != 'atom':
+        parser.error('--allow_global_sign_flip requires --property_level atom')
+    return args
 
 
 def main():
     """Main function to orchestrate the training and evaluation process."""
     args = parse_args()
+    if args.num_gpus == 0:
+        args.cpu_only = True
+        args.num_gpus = 1
     
     # Print GPU diagnostics
     print_gpu_info()
@@ -1488,7 +1569,10 @@ def main():
             pin_memory=args.pin_memory,
             manual_mean=args.manual_mean,
             manual_stdev=args.manual_stdev,
-            head_reduce=args.head_reduce
+            head_reduce=args.head_reduce,
+            property_level=args.property_level,
+            allow_global_sign_flip=args.allow_global_sign_flip,
+            loss=args.loss,
         )
         
         # Exit early if dryrun mode
@@ -1543,7 +1627,10 @@ def main():
             test_data_path=test_data_path,
             target_property=args.target_property,
             material_id=args.material_id,
-            output_prefix=output_prefix
+            output_prefix=output_prefix,
+            property_level=args.property_level,
+            allow_global_sign_flip=args.allow_global_sign_flip,
+            loss=args.loss,
         )
 
         best_csv_output = None
@@ -1577,6 +1664,9 @@ def main():
                         target=args.target_property,
                         material_id=args.material_id,
                         application=False,
+                        property_level=args.property_level,
+                        allow_global_sign_flip=args.allow_global_sign_flip,
+                        loss=args.loss,
                     )
                     final_csv_output = (
                         f"{cpdir}/performance_final_"
@@ -1626,6 +1716,9 @@ def main():
                         target=args.target_property,
                         material_id=args.material_id,
                         application=False,
+                        property_level=args.property_level,
+                        allow_global_sign_flip=args.allow_global_sign_flip,
+                        loss=args.loss,
                     )
                     best_csv_output = (
                         f"{cpdir}/performance_best_"
@@ -1709,12 +1802,14 @@ def main():
                 num_gpus   = args.num_gpus,
             )
             
+        if cpdir is None:
+            raise RuntimeError('Prediction failed; inspect the application warning log')
         prd_path = cpdir.replace('checkpoints', 'results') + '/ocp_predictions.npz'
         
         # Collect results
         df = collect_result(args.lmdb_path, prd_path, 
                             target=target_property, material_id=args.material_id,
-                            application=True)
+                            application=True, **local_settings(config_yml))
         
         print("\n" + "="*50)
         print("PREDICTION COMPLETED")

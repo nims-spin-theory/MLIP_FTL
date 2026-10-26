@@ -144,6 +144,9 @@ class BaseTask:
         # unexpected missing-key noise while still only transferring chosen keys.
         load_state_dict(self.trainer.model, model_state, strict=True)
 
+        if hasattr(self.trainer, "reset_transfer_ema"):
+            self.trainer.reset_transfer_ema()
+
         logging.info(
             "Partial TL loaded %s tensors (transfer layers=%s) from %s",
             len(transferred),

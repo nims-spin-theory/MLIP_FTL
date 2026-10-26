@@ -498,6 +498,26 @@ class MLP_Energy_Head(nn.Module, HeadInterface):
             )
 
 
+@registry.register_model("esen_mlp_scalar_site_head")
+class MLPScalarSiteHead(nn.Module, HeadInterface):
+    """One rotation-invariant scalar per site, without atom pooling."""
+
+    def __init__(self, backbone, output_name: str = "local_property"):
+        super().__init__()
+        self.output_name = output_name
+        self.property_block = nn.Sequential(
+            nn.Linear(backbone.sphere_channels, backbone.hidden_channels),
+            nn.SiLU(),
+            nn.Linear(backbone.hidden_channels, backbone.hidden_channels),
+            nn.SiLU(),
+            nn.Linear(backbone.hidden_channels, 1),
+        )
+
+    def forward(self, data_dict, emb):
+        scalars = emb["node_embedding"][:, 0, :]
+        return {self.output_name: self.property_block(scalars)}
+
+
 @registry.register_model("esen_linear_force_head")
 class Linear_Force_Head(nn.Module, HeadInterface):
     def __init__(self, backbone):

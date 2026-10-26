@@ -455,7 +455,8 @@ def validate_lmdb_database(lmdb_path, max_samples_to_check=10):
         return False
 
 
-def db_to_atomslist(compounds_df, material_id_col, properties,  dir_poscar=None, symmetrize=False):
+def db_to_atomslist(compounds_df, material_id_col, properties,  dir_poscar=None, symmetrize=False,
+                    local_target=None):
     """
     Convert pandas DataFrame to list of ASE atoms objects.
     
@@ -553,11 +554,19 @@ def db_to_atomslist(compounds_df, material_id_col, properties,  dir_poscar=None,
             # Attach metadata to atoms object
             atoms.info['id'] = i
             for key, item in properties.items():
-                atoms.info[key] = compounds_df.loc[i][item]
+                value = compounds_df.loc[i][item]
+                if item == local_target:
+                    from fairchem.core.modules.local_property import parse_local_target
+                    value = parse_local_target(value, len(atoms))
+                atoms.info[key] = value
             
             atoms_list.append(atoms)
             
         except Exception as e:
+            if local_target is not None:
+                raise ValueError(
+                    f"Invalid local data at row {i}, material {compounds_df.loc[i][material_id_col]}: {e}"
+                ) from e
             print(f"Warning: Error processing compound at index {i}: {e}")
             skipped_count += 1
             continue
@@ -580,7 +589,8 @@ def analyze_dataset_statistics(lmdb_path, target_prop, output_dir=None, split_na
     """
     try:
         dataset = LmdbDataset({"src": lmdb_path})
-        values = [data[target_prop] for data in dataset]
+        values = np.concatenate([np.asarray(data[target_prop]).reshape(-1) for data in dataset])
+        del dataset
         
         # Plot histogram
         plt.figure(figsize=(8, 6))
@@ -714,7 +724,12 @@ def parse_args():
         help='Reduce structures to primitive cells via spglib (default: off)'
     )
     
-    return parser.parse_args()
+    parser.add_argument('--property_level', choices=['system', 'atom'], default='system',
+                        help='One scalar per structure (default) or per atom')
+    args = parser.parse_args()
+    if args.property_level == 'atom' and args.symmetrize:
+        parser.error('--symmetrize cannot preserve local target site correspondence')
+    return args
 
 
 def main():
@@ -852,10 +867,29 @@ def main():
                   f"dataset size ({len(compounds_df)}), using all samples")
 
     # Display basic statistics about the target property
+    local_target = args.target_property if args.property_level == 'atom' and not args.apply else None
+    if local_target is not None:
+        from fairchem.core.modules.local_property import parse_local_target
+        for frame in (compounds_df, test_df, val_df):
+            if frame is None:
+                continue
+            for index, row in frame.iterrows():
+                try:
+                    # POSCAR inputs are checked against the loaded structure below.
+                    if args.poscar_dir is None:
+                        parse_local_target(row[local_target], len(ast.literal_eval(row['numbers'])))
+                    else:
+                        value = ast.literal_eval(row[local_target])
+                        parse_local_target(value, len(value))
+                except Exception as error:
+                    raise ValueError(f"Invalid local target at row {index}, material {row[args.material_id]}: {error}") from error
     if args.apply:
         print(f"Generating the lmbd dataset for prediction application.")
     elif args.target_property in compounds_df.columns:
         prop_values = compounds_df[args.target_property].dropna()
+        if local_target is not None:
+            prop_values = pd.Series(np.concatenate([np.asarray(ast.literal_eval(value)).reshape(-1)
+                                                   for value in prop_values]))
         if len(prop_values) > 0:
             print(f"\n{args.target_property} statistics:")
             print(f"  Count: {len(prop_values)}")
@@ -873,7 +907,7 @@ def main():
     print("\nConverting to atoms list...")
     atoms_list = db_to_atomslist(compounds_df, dir_poscar=args.poscar_dir, 
                                  properties=properties, material_id_col=args.material_id,
-                                 symmetrize=args.symmetrize)
+                                 symmetrize=args.symmetrize, local_target=local_target)
     print(f"Successfully converted {len(atoms_list)} structures")
     
     if len(atoms_list) == 0:
@@ -885,7 +919,7 @@ def main():
         print("\nConverting fixed test CSV to atoms list...")
         test_atoms_list = db_to_atomslist(test_df, dir_poscar=args.poscar_dir,
                                           properties=properties, material_id_col=args.material_id,
-                                          symmetrize=args.symmetrize)
+                                          symmetrize=args.symmetrize, local_target=local_target)
         print(f"Successfully converted {len(test_atoms_list)} fixed test structures")
         if len(test_atoms_list) == 0:
             print("No structures were loaded from test_csv_file. Check your data paths.")
@@ -896,7 +930,7 @@ def main():
         print("\nConverting fixed validation CSV to atoms list...")
         val_atoms_list = db_to_atomslist(val_df, dir_poscar=args.poscar_dir,
                                          properties=properties, material_id_col=args.material_id,
-                                         symmetrize=args.symmetrize)
+                                         symmetrize=args.symmetrize, local_target=local_target)
         print(f"Successfully converted {len(val_atoms_list)} fixed validation structures")
         if len(val_atoms_list) == 0:
             print("No structures were loaded from val_csv_file. Check your data paths.")

@@ -30,9 +30,11 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score, mean_absolute_error
 
 from fairchem.core.datasets import LmdbDataset
+from fairchem.core.modules.local_property import collect_local_results, plot_local_performance
 
 
-def collect_result(lmdb_path, pred_path, target_property, material_id):
+def collect_result(lmdb_path, pred_path, target_property, material_id,
+                   property_level='system', allow_global_sign_flip=False, loss='mae'):
     """
     Merge ground-truth values from test.lmdb with ML predictions from
     ocp_predictions.npz.
@@ -46,6 +48,9 @@ def collect_result(lmdb_path, pred_path, target_property, material_id):
     Returns:
         pd.DataFrame: Columns_id, material_id, <target> ML, <target> DFT
     """
+    if property_level == 'atom':
+        return collect_local_results(lmdb_path, pred_path, target_property, material_id,
+                                     allow_global_sign_flip=allow_global_sign_flip, loss=loss)
     dataset = LmdbDataset({"src": lmdb_path})
 
     prd_raw = np.load(pred_path)
@@ -79,6 +84,8 @@ def plot_performance(df, target_property, output_path):
         output_path (str): File path for the saved PNG (without extension)
     """
     dft_col = target_property + " DFT"
+    if len(df) and isinstance(df[dft_col].iloc[0], str) and df[dft_col].iloc[0].startswith('['):
+        return plot_local_performance(df, target_property, output_path + '.png')
     ml_col  = target_property + " ML"
 
     r2   = r2_score(df[dft_col], df[ml_col])
@@ -157,7 +164,14 @@ def parse_args():
         default=None,
         help='Directory for output CSV and PNG (default: same directory as pred_path)'
     )
-    return parser.parse_args()
+    parser.add_argument('--property_level', choices=['system', 'atom'], default='system')
+    parser.add_argument('--allow_global_sign_flip', action='store_true')
+    parser.add_argument('--loss', choices=['mae', 'mse'], default='mae',
+                        help='Use the same loss as training for global sign alignment')
+    args = parser.parse_args()
+    if args.allow_global_sign_flip and args.property_level != 'atom':
+        parser.error('--allow_global_sign_flip requires --property_level atom')
+    return args
 
 
 def main():
@@ -184,6 +198,9 @@ def main():
         pred_path=args.pred_path,
         target_property=args.target_property,
         material_id=args.material_id,
+        property_level=args.property_level,
+        allow_global_sign_flip=args.allow_global_sign_flip,
+        loss=args.loss,
     )
 
     csv_path = os.path.join(args.output_dir, f"performance_{tag}.csv")

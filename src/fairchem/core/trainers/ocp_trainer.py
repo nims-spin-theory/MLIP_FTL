@@ -502,8 +502,11 @@ class OCPTrainer(BaseTrainer):
                         _per_image_fixed = torch.split(
                             batch_fixed, batch_natoms.tolist()
                         )
+                        only_free = self.config["outputs"][target_key].get(
+                            "predict_on_free_atoms", True
+                        )
                         _per_image_free_preds = [
-                            _pred[(fixed == 0).tolist()].numpy()
+                            (_pred[(fixed == 0).tolist()] if only_free else _pred).numpy()
                             for _pred, fixed in zip(per_image_pred, _per_image_fixed)
                         ]
                         _chunk_idx = np.array(
