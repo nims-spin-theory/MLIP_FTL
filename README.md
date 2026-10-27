@@ -649,6 +649,50 @@ python scripts/evaluate_result.py --lmdb_path set_local_spins/test.lmdb \
     --property_level atom --allow_global_sign_flip --loss mae
 ```
 
+Standalone evaluation also accepts the original source CSV, even when it contains
+more materials than the prediction archive. Choose exactly one of `--csv_path`
+and `--lmdb_path`. For a system property:
+
+```bash
+python scripts/evaluate_result.py --csv_path database.csv \
+    --pred_path path/to/ocp_predictions.npz \
+    --target_property "Tc (K)(KKR-FULL)" --material_id UUID
+```
+
+For atomic properties, use the same mode, sign setting, and loss as training:
+
+```bash
+python scripts/evaluate_result.py --csv_path dev_local_property/dev.csv \
+    --pred_path path/to/ocp_predictions.npz \
+    --target_property vasp_magmoms --material_id material_id \
+    --property_level atom --allow_global_sign_flip --loss mae
+```
+
+CSV evaluation matches the `--material_id` column to the archive's `material_ids`
+array, preserving prediction order and ignoring extra CSV materials. Identifiers
+are compared as strings without fuzzy matching or numeric coercion; leading
+zeros are significant. Each predicted material must have exactly one CSV match.
+Missing matches, duplicate predicted identifiers, duplicate matching CSV rows,
+and invalid matched targets raise errors before output files are written. Target
+values for unrelated CSV materials are ignored. Atomic lists must contain one
+finite scalar per predicted atom in exactly the atom order used for prediction.
+Output columns and metrics match LMDB evaluation; in CSV mode, `id` records the
+original NPZ prediction ID.
+
+New predictions made through `scripts/MLIP_FTL.py` include `material_ids` using
+the existing `--material_id` argument. For direct FairChem prediction commands,
+set `task.material_id_field` in the YAML configuration to the LMDB identifier
+attribute (for example, `UUID`). The exporter stores strings alongside the
+existing prediction arrays, including during distributed prediction. Configs
+without this setting retain their previous export behavior.
+
+Older NPZ archives without `material_ids` still work with `--lmdb_path`. To use
+them with a source CSV, regenerate predictions from the existing checkpoint
+with the updated exporter and `--material_id`; retraining is unnecessary. For
+example, `MLIP_FTL.py --apply --model_path checkpoint.pt --lmdb_path test.lmdb
+--material_id UUID` also exports identifiers when the checkpoint predates this
+feature. The CSV alone cannot recover shuffled or filtered LMDB row identities.
+
 For new compounds, prepare an unlabeled dataset and apply the trained checkpoint:
 
 ```bash

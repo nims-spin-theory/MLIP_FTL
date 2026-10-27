@@ -427,7 +427,7 @@ def create_config_file(config_path, data_dir, target_property,
                        auto_normalize=True, cpu_only=False, num_gpus=1,
                        num_workers=4, pin_memory=False, manual_mean=None,
                        manual_stdev=None, head_reduce='sum', property_level='system',
-                       allow_global_sign_flip=False, loss='mae'):
+                       allow_global_sign_flip=False, loss='mae', material_id=None):
     """
     Create comprehensive YAML configuration file for training.
     
@@ -451,6 +451,7 @@ def create_config_file(config_path, data_dir, target_property,
         manual_mean (float): Manually specified mean (overrides auto-calculation)
         manual_stdev (float): Manually specified stdev (overrides auto-calculation)
         head_reduce (str): Pooling reduction for energy heads ('sum' or 'mean')
+        material_id (str | None): LMDB attribute to export in prediction archives
     """
     if allow_global_sign_flip and property_level != 'atom':
         raise ValueError('Global sign equivalence requires --property_level atom')
@@ -614,6 +615,8 @@ def create_config_file(config_path, data_dir, target_property,
         'trainer': 'mlip_trainer'
     }
     
+    if material_id is not None:
+        config.setdefault('task', {})['material_id_field'] = material_id
     config['loss_functions'][0]['energy']['fn'] = loss
     if property_level == 'atom':
         for split in config['dataset'].values():
@@ -888,7 +891,7 @@ def plot_performance(df, target_property, output_prefix):
 def run_predict(checkpoint_path, config_path, run_dir, job_name,
                 lmdb_override=None, log_prefix="predict",
                 gpu_id=0, print_every=50, cpu_only=False, num_gpus=1,
-                copy_artifacts=False):
+                copy_artifacts=False, material_id=None):
     """
     Run prediction using a specific checkpoint and config.
 
@@ -905,6 +908,7 @@ def run_predict(checkpoint_path, config_path, run_dir, job_name,
         cpu_only (bool): Whether to force CPU-only mode.
         num_gpus (int): Number of GPUs to use.
         copy_artifacts (bool): If True, copy the original config and log files into cpdir.
+        material_id (str | None): Override the LMDB identifier field for NPZ export.
 
     Returns:
         str | None: Prediction checkpoint directory if successful, else None.
@@ -918,6 +922,8 @@ def run_predict(checkpoint_path, config_path, run_dir, job_name,
     shutil.copy(config_path, patched_config)
     with open(patched_config) as f:
         config_yml = yaml.safe_load(f)
+    if material_id is not None:
+        config_yml.setdefault('task', {})['material_id_field'] = material_id
 
     # change to full TL mode for prediction to ensure all layers are used for inference
     config_yml['optim']['TL_mode'] = 'full'  
@@ -1005,7 +1011,7 @@ def run_predict(checkpoint_path, config_path, run_dir, job_name,
 
         if copy_artifacts:
             config_dest = os.path.join(cpdir, 'config.yml')
-            subprocess.run(['cp', config_path, config_dest], check=True)
+            subprocess.run(['cp', effective_config, config_dest], check=True)
             log_dest = os.path.join(cpdir, os.path.basename(log_file))
             warn_dest = os.path.join(cpdir, os.path.basename(warn_file))
             subprocess.run(['cp', log_file, log_dest], check=True)
@@ -1092,7 +1098,7 @@ def patch_apply_config_for_lmdb(config_yml, lmdb_override):
 
 
 def run_application(checkpoint_path, lmdb_path, run_dir, job_name, gpu_id=0,
-                    print_every=50, cpu_only=False, num_gpus=1):
+                    print_every=50, cpu_only=False, num_gpus=1, material_id=None):
     """
     Execute application of trained model.
 
@@ -1105,6 +1111,7 @@ def run_application(checkpoint_path, lmdb_path, run_dir, job_name, gpu_id=0,
         print_every (int): Frequency of progress printing.
         cpu_only (bool): Whether to use CPU-only mode.
         num_gpus (int): Number of GPUs to use.
+        material_id (str | None): LMDB identifier field, including for old checkpoints.
 
     Returns:
         str | None: Path to checkpoint directory if successful, else None.
@@ -1135,6 +1142,7 @@ def run_application(checkpoint_path, lmdb_path, run_dir, job_name, gpu_id=0,
             cpu_only=cpu_only,
             num_gpus=num_gpus,
             copy_artifacts=True,
+            material_id=material_id,
         )
     finally:
         try:
@@ -1573,6 +1581,7 @@ def main():
             property_level=args.property_level,
             allow_global_sign_flip=args.allow_global_sign_flip,
             loss=args.loss,
+            material_id=args.material_id,
         )
         
         # Exit early if dryrun mode
@@ -1651,6 +1660,7 @@ def main():
                     run_dir=args.output_dir,
                     job_name=final_eval_identifier,
                     log_prefix="eval",
+                    material_id=args.material_id,
                     gpu_id=args.gpu_id,
                     cpu_only=args.cpu_only,
                     num_gpus=args.num_gpus,
@@ -1703,6 +1713,7 @@ def main():
                     run_dir=args.output_dir,
                     job_name=best_eval_identifier,
                     log_prefix="eval",
+                    material_id=args.material_id,
                     gpu_id=args.gpu_id,
                     cpu_only=args.cpu_only,
                     num_gpus=args.num_gpus,
@@ -1795,6 +1806,7 @@ def main():
         cpdir = run_application(
                 checkpoint_path = args.model_path,
                 lmdb_path       = args.lmdb_path, 
+                material_id     = args.material_id,
                 run_dir    = args.output_dir,
                 job_name   = args.job_name,
                 gpu_id     = args.gpu_id,

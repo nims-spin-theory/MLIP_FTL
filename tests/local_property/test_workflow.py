@@ -207,6 +207,7 @@ def test_training_checkpoint_and_unlabeled_application(tmp_path, monkeypatch, de
         str(config_path),
         str(tmp_path / "data"),
         "spin",
+        material_id="material_id",
         property_level="atom",
         allow_global_sign_flip=True,
         loss="mse",
@@ -273,6 +274,11 @@ def test_training_checkpoint_and_unlabeled_application(tmp_path, monkeypatch, de
     )
     assert cpdir is not None
     archive = cpdir.replace("checkpoints", "results") + "/ocp_predictions.npz"
+    with np.load(archive, allow_pickle=False) as predictions:
+        assert predictions["material_ids"].dtype.kind == "U"
+        assert predictions["material_ids"].tolist() == pd.read_csv(FIXTURE)[
+            "material_id"
+        ].tolist()
     output = mlip.collect_result(
         str(tmp_path / "apply" / "apply.lmdb"),
         archive,

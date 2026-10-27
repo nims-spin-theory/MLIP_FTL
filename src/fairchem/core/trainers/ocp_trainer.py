@@ -30,6 +30,43 @@ if TYPE_CHECKING:
     from torch_geometric.data import Batch
 
 
+def _batch_material_ids(batch, field, count):
+    """Read scalar graph metadata without copying the batched atomic tensors."""
+    if field not in batch:
+        raise ValueError(f"Configured material identifier field {field!r} is missing")
+    values = batch[field]
+    if not isinstance(values, (list, tuple, torch.Tensor, np.ndarray)):
+        raise ValueError(f"Expected one material identifier per structure in {field!r}")
+    if isinstance(values, (torch.Tensor, np.ndarray)) and values.ndim == 0:
+        raise ValueError(f"Expected one material identifier per structure in {field!r}")
+    if len(values) != count:
+        raise ValueError(f"Expected {count} material identifiers in {field!r}")
+    identifiers = []
+    for raw_value in values:
+        value = raw_value
+        if isinstance(value, torch.Tensor):
+            if value.numel() != 1:
+                raise ValueError(f"Material identifiers in {field!r} must be scalars")
+            value = value.item()
+        elif isinstance(value, np.ndarray):
+            if value.size != 1:
+                raise ValueError(f"Material identifiers in {field!r} must be scalars")
+            value = value.item()
+        if isinstance(value, np.generic):
+            value = value.item()
+        if not isinstance(value, (str, int, float, bool)):
+            raise ValueError(
+                f"Material identifiers in {field!r} must be nonempty scalars"
+            )
+        if isinstance(value, float) and not np.isfinite(value):
+            raise ValueError(f"Material identifiers in {field!r} must be finite")
+        identifier = str(value)
+        if not identifier.strip():
+            raise ValueError(f"Material identifiers in {field!r} must not be blank")
+        identifiers.append(identifier)
+    return identifiers
+
+
 @registry.register_trainer("ocp")
 @registry.register_trainer("energy")
 @registry.register_trainer("forces")
@@ -547,6 +584,11 @@ class OCPTrainer(BaseTrainer):
                 systemids = [f"{sid}" for sid in sids]
 
             predictions["ids"].extend(systemids)
+            material_id_field = self.config["task"].get("material_id_field")
+            if material_id_field is not None:
+                predictions["material_ids"].extend(
+                    _batch_material_ids(batch, material_id_field, len(systemids))
+                )
 
         self.save_results(predictions, results_file)
 
